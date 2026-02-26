@@ -4,6 +4,7 @@ import re
 import hashlib
 from pathlib import Path
 from typing import Dict, Optional, Tuple, List
+from openpyxl.styles import PatternFill
 
 import numpy as np
 import pandas as pd
@@ -327,10 +328,34 @@ def build_multi_sheet_excel(sheets: Dict[str, pd.DataFrame]) -> bytes:
         with pd.ExcelWriter(bio, engine="openpyxl") as writer:
             for sh, df in safe_sheets.items():
                 df.to_excel(writer, index=False, sheet_name=sh)
+
+                # ✅ Pintar amarillo filas con OBS en P03 (solo en Excel descargado)
+                if sh == "P03" and ("OBS" in df.columns):
+                    ws = writer.sheets[sh]
+
+                    yellow_fill = PatternFill(
+                        start_color="FFF59D",
+                        end_color="FFF59D",
+                        fill_type="solid",
+                    )
+
+                    # columna OBS (1-based en openpyxl)
+                    obs_col_idx = list(df.columns).index("OBS") + 1
+
+                    # recorrer filas de datos (row 1 es header, empieza en 2)
+                    for row_idx in range(2, len(df) + 2):
+                        obs_val = ws.cell(row=row_idx, column=obs_col_idx).value
+                        if obs_val is not None and str(obs_val).strip() != "":
+                            for col_idx in range(1, len(df.columns) + 1):
+                                ws.cell(row=row_idx, column=col_idx).fill = yellow_fill
+
         return bio.getvalue()
+
     except Exception as e1:
         bio = io.BytesIO()
         try:
+            # ⚠️ Fallback: xlsxwriter NO aplica estilos con openpyxl PatternFill
+            # (pero sirve para no romper la descarga si openpyxl falla)
             with pd.ExcelWriter(bio, engine="xlsxwriter") as writer:
                 for sh, df in safe_sheets.items():
                     df.to_excel(writer, index=False, sheet_name=sh)
@@ -343,8 +368,6 @@ def build_multi_sheet_excel(sheets: Dict[str, pd.DataFrame]) -> bytes:
                 "Solución: instala xlsxwriter:\n"
                 "   pip install -U xlsxwriter\n"
             )
-
-
 def resolve_course_name_and_origin(pl2: pd.DataFrame, carrera_key: str, plan_key: str, cod_curso_key: str) -> Tuple[str, str, str]:
     carrera_key = "" if carrera_key is None else str(carrera_key).strip()
     plan_key = "" if plan_key is None else str(plan_key).strip()
