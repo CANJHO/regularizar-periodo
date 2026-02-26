@@ -148,6 +148,7 @@ HEADER_HINTS = [
     "plan", "plan_sigu", "periodo", "periodo_ingreso"
 ]
 
+
 def _to_bytes(uploaded_or_path) -> bytes:
     if uploaded_or_path is None:
         return b""
@@ -162,6 +163,7 @@ def _to_bytes(uploaded_or_path) -> bytes:
             pass
         return b
     return Path(uploaded_or_path).read_bytes()
+
 
 def _best_header_row_from_preview(preview_df: pd.DataFrame, max_rows: int = 60) -> int:
     best_i = 0
@@ -201,6 +203,7 @@ def _best_header_row_from_preview(preview_df: pd.DataFrame, max_rows: int = 60) 
     if best_score < 2:
         return 0
     return best_i
+
 
 def read_excel_any(file_or_path, sheet_name=0) -> pd.DataFrame:
     bio = io.BytesIO(_to_bytes(file_or_path))
@@ -416,6 +419,7 @@ COURSE_STOPWORDS = {
 
 ROMAN_KEEP = {"ii", "iii", "iv", "v", "vi", "vii", "viii", "ix", "x"}  # se conservan
 
+
 def parse_nota_to_float(x) -> float:
     s = "" if x is None else str(x).strip()
     if s == "":
@@ -425,6 +429,7 @@ def parse_nota_to_float(x) -> float:
         return float(s)
     except Exception:
         return np.nan
+
 
 def course_base_name(cod_curso: str, nom_curso: str) -> str:
     cod = "" if cod_curso is None else str(cod_curso).strip().upper()
@@ -440,6 +445,7 @@ def course_base_name(cod_curso: str, nom_curso: str) -> str:
 
     return nom_n if nom_n != "" else cod
 
+
 def compatible_family(student_cod: str) -> set:
     if not student_cod:
         return set()
@@ -449,6 +455,7 @@ def compatible_family(student_cod: str) -> set:
         return FAM_SALUD
     return {student_cod}
 
+
 def _soft_singularize_token(w: str) -> str:
     if (
         len(w) >= 7 and w.endswith("s")
@@ -456,6 +463,7 @@ def _soft_singularize_token(w: str) -> str:
     ):
         return w[:-1]
     return w
+
 
 def course_match_key(text: str) -> str:
     """
@@ -507,8 +515,10 @@ def course_match_key(text: str) -> str:
 # -------------------------
 REEMPLAZO_DESDE_PERIODO = "2018-1"
 
+
 def _is_periodo_like(p: str) -> bool:
     return bool(re.fullmatch(r"\d{4}\-\d{1,2}", (p or "").strip()))
+
 
 def _periodo_to_tuple(p: str):
     if not _is_periodo_like(p):
@@ -519,12 +529,14 @@ def _periodo_to_tuple(p: str):
     except Exception:
         return None
 
+
 def _period_ge(p: str, ref: str) -> bool:
     a = _periodo_to_tuple(p)
     b = _periodo_to_tuple(ref)
     if a is None or b is None:
         return False
     return a >= b
+
 
 # Keys canon (usan el mismo normalizador course_match_key)
 KEY_REDA_COMU = course_match_key("Redacción y Comunicación")
@@ -697,13 +709,16 @@ ESCUELA_PLANES_ACTIVOS = {
     "P09": {"201722", "20242"},
 }
 
+
 def escuela_from_programa(programa: str) -> str:
     key = norm_text_keep_spaces(programa)
     return PROG_TO_ESCUELA.get(key, "")
 
+
 def tipo_matricula_from_codcurso(cod_curso: str) -> str:
     c = "" if cod_curso is None else str(cod_curso).strip().upper()
     return "EXSUF" if c.startswith("EXSUF") else "R"
+
 
 def _plan_to_num(s: str) -> Optional[int]:
     t = "" if s is None else str(s).strip()
@@ -716,6 +731,7 @@ def _plan_to_num(s: str) -> Optional[int]:
         return int(t)
     except Exception:
         return None
+
 
 def normalize_plan_by_matrix(plan_sigu: str, escuela: str) -> str:
     p = "" if plan_sigu is None else str(plan_sigu).strip()
@@ -748,6 +764,7 @@ def normalize_plan_by_matrix(plan_sigu: str, escuela: str) -> str:
 
     return ""
 
+
 def is_egresado_flag(val, codigo_alumno=None) -> bool:
     s = "" if val is None else str(val).strip()
     if s == "":
@@ -771,6 +788,7 @@ def _clean_codcurso(x: str) -> str:
     s = "" if x is None else str(x).strip().upper()
     s = re.sub(r"\s+", "", s)
     return s
+
 
 def _course_name_key(name: str) -> str:
     """
@@ -798,6 +816,7 @@ def _course_name_key(name: str) -> str:
 
     toks.sort()
     return " ".join(toks).strip()
+
 
 def build_todos_planes_akademic_map(df_tpa: pd.DataFrame) -> pd.DataFrame:
     if "codigo" not in df_tpa.columns:
@@ -827,12 +846,54 @@ def build_todos_planes_akademic_map(df_tpa: pd.DataFrame) -> pd.DataFrame:
     out = out[out["codigo_raw"].astype(str).str.strip() != ""].copy()
     return out
 
+
+# =========================================================
+# ✅ BLINDAJE: evitar fuzzy-match incorrecto con niveles (II/III/IV)
+# =========================================================
+ROMAN_LEVELS = {"i", "ii", "iii", "iv", "v", "vi", "vii", "viii", "ix", "x"}
+
+
+def _extract_roman_level(name: str) -> str:
+    """
+    Devuelve el nivel romano encontrado (i/ii/iii/iv...) si está como token.
+    Si no hay, devuelve "".
+    """
+    t = norm_text_keep_spaces(name)
+    if not t:
+        return ""
+    toks = t.split()
+    if not toks:
+        return ""
+    last = toks[-1]
+    if last in ROMAN_LEVELS:
+        return last
+    for w in reversed(toks):
+        if w in ROMAN_LEVELS:
+            return w
+    return ""
+
+
+def _roman_level_compatible(target_name: str, cand_name: str) -> bool:
+    """
+    Reglas:
+    - Si target tiene nivel (II/III/IV...), el candidato DEBE tener el MISMO.
+    - Si target NO tiene nivel, el candidato tampoco debe tener.
+    """
+    lt = _extract_roman_level(target_name)
+    lc = _extract_roman_level(cand_name)
+    if lt:
+        return lc == lt
+    return lc == ""
+
+
 def _best_fuzzy_match_code(same_plan_df: pd.DataFrame, nombre_curso: str, min_ratio: float = 0.86) -> str:
     """
     Mejor match por parecido (difflib) dentro del MISMO plan.
+    ✅ BLINDADO: NO permite match si el nivel romano no coincide (II/III/IV...).
     Devuelve codigo_raw si supera umbral.
     """
-    target = norm_text_keep_spaces(nombre_curso)
+    target_raw = "" if nombre_curso is None else str(nombre_curso)
+    target = norm_text_keep_spaces(target_raw)
     if target == "":
         return ""
 
@@ -840,9 +901,15 @@ def _best_fuzzy_match_code(same_plan_df: pd.DataFrame, nombre_curso: str, min_ra
     best_code = ""
 
     for _, r in same_plan_df.iterrows():
-        cand = norm_text_keep_spaces(r.get("curso_raw", ""))
+        cand_raw = "" if r.get("curso_raw", "") is None else str(r.get("curso_raw", ""))
+        cand = norm_text_keep_spaces(cand_raw)
         if cand == "":
             continue
+
+        # ✅ BLINDAJE: nivel romano debe ser compatible
+        if not _roman_level_compatible(target_raw, cand_raw):
+            continue
+
         ratio = difflib.SequenceMatcher(None, target, cand).ratio()
         if ratio > best_ratio:
             best_ratio = ratio
@@ -851,6 +918,7 @@ def _best_fuzzy_match_code(same_plan_df: pd.DataFrame, nombre_curso: str, min_ra
     if best_ratio >= min_ratio:
         return best_code
     return ""
+
 
 def lookup_codigo_curso_tpa(tpa_map: pd.DataFrame, escuela: str, plan: str, codcurso: str, nombre_curso: str) -> str:
     """
@@ -887,7 +955,7 @@ def lookup_codigo_curso_tpa(tpa_map: pd.DataFrame, escuela: str, plan: str, codc
         if len(same_plan2) > 0:
             return str(same_plan2.iloc[0]["codigo_raw"]).strip()
 
-    # 3) fuzzy por parecido dentro del MISMO plan
+    # 3) fuzzy por parecido dentro del MISMO plan (blindado por nivel romano)
     fb = _best_fuzzy_match_code(same_plan, nombre_curso=nombre_curso, min_ratio=0.86)
     if fb:
         return fb
@@ -901,17 +969,21 @@ def lookup_codigo_curso_tpa(tpa_map: pd.DataFrame, escuela: str, plan: str, codc
 def _hash_bytes(b: bytes) -> str:
     return hashlib.md5(b).hexdigest()
 
+
 @st.cache_data(show_spinner=False)
 def _cached_read_excel_bytes(file_bytes: bytes, _md5: str) -> pd.DataFrame:
     return read_excel_any(io.BytesIO(file_bytes))
+
 
 @st.cache_data(show_spinner=False)
 def _cached_read_excel_path(path_str: str) -> pd.DataFrame:
     return read_excel_any(path_str)
 
+
 @st.cache_data(show_spinner=False)
 def _cached_read_curlle_bytes(file_bytes: bytes, _md5: str) -> pd.DataFrame:
     return read_curlle(io.BytesIO(file_bytes))
+
 
 @st.cache_data(show_spinner=False)
 def _cached_read_curlle_path(path_str: str) -> pd.DataFrame:
@@ -991,7 +1063,6 @@ if not todos_planes_ak_file and not DEFAULT_TODOS_PLANES_AKADEMIC.exists():
     st.error(f"No encuentro {DEFAULT_TODOS_PLANES_AKADEMIC.name} en la raíz. Marca override y súbelo.")
     st.stop()
 
-
 # =========================
 # ✅ Guard por tamaño (evita tumbar Streamlit)
 # =========================
@@ -1001,7 +1072,6 @@ if padron_file and padron_file.name.lower().endswith((".xlsx", ".xls")):
     if size_mb > MAX_MB:
         st.error(f"Tu padrón pesa {size_mb:.1f} MB. Recomendado < {MAX_MB} MB o súbelo como CSV.")
         st.stop()
-
 
 # =========================
 # Load Padrón (estable)
@@ -1016,7 +1086,6 @@ with st.spinner("Leyendo PADRÓN..."):
 
 with st.expander("🧪 Debug padrón: columnas detectadas"):
     st.write(padron.columns.tolist()[:120])
-
 
 # =========================
 # Detección columnas PADRÓN
@@ -1101,7 +1170,6 @@ if padron_periodo_ingreso_col:
 else:
     padron["periodo_ingreso_fmt"] = ""
 
-
 # =========================
 # Load bases (estable)
 # =========================
@@ -1136,7 +1204,6 @@ try:
 except Exception as e:
     st.error(str(e))
     st.stop()
-
 
 # =========================
 # Normalize keys
@@ -1193,7 +1260,6 @@ pl2["plan_key"] = ex["plan"].fillna("").astype(str).str.strip()
 pl2["cod_curso_key"] = pl2["codigo"].fillna("").astype(str).str.strip().str.upper()
 pl2["curso"] = pl2["curso"].fillna("").astype(str).str.strip()
 
-
 # =========================
 # 1) Cruce con Akademic (P01) por DNI O COD
 # =========================
@@ -1235,7 +1301,6 @@ p01_data = pd.DataFrame({
     "PLAN-AKADEMIC": en_ak["ak_plan_final"],
 }).drop_duplicates()
 
-
 # =========================
 # 2) Cruce no akademic vs Curlle (P02 / P03)
 # =========================
@@ -1272,7 +1337,6 @@ p02_data = pd.DataFrame({
     "NOMBRES-COMPLETOS": no_curlle["nombre_completo"],
     "PLAN-SUBIDO": no_curlle[padron_plan_sigu_col].fillna("").astype(str).str.strip() if padron_plan_sigu_col else "",
 })
-
 
 # =========================
 # P03: resolver nombre + origen (plan/carrera)
@@ -1325,9 +1389,7 @@ p03_data = pd.DataFrame({
     "Cod. Carrera": si_curlle_dep["cod_carrera_out"],
     "PLAN-SIGU": si_curlle_dep[padron_plan_sigu_col].fillna("").astype(str).str.strip() if padron_plan_sigu_col else "",
 })
-# ✅ OBS para marcar lo que NO pasa a P04
 p03_data["OBS"] = ""
-
 
 # =========================
 # P04
@@ -1374,8 +1436,6 @@ plan_codigo_series = (
 tipo_matricula_series = si_curlle_dep["cod_curso"].map(tipo_matricula_from_codcurso)
 
 # ✅ Periodo P04:
-# - Si EXSUFxxxx => usar periodo_ingreso_fmt del padrón
-# - Si periodo malo => también usar periodo_ingreso_fmt
 periodo_p04 = si_curlle_dep["periodo_fmt"].fillna("").astype(str).str.strip().copy()
 exsuf_mask = si_curlle_dep["cod_curso"].fillna("").astype(str).str.strip().str.upper().str.startswith("EXSUF")
 bad_mask = periodo_p04.isin(["#¿NOMBRE?", "221"])
@@ -1403,11 +1463,9 @@ for i in range(len(si_curlle_dep)):
 
 codigo_curso_series = pd.Series(codigo_curso_series, index=si_curlle_dep.index).fillna("").astype(str).str.strip()
 
-# ✅ marcar los que NO encontraron CodigoCurso en el plan (no pasan a P04)
 p04_ok_mask = codigo_curso_series.fillna("").astype(str).str.strip().ne("")
 p03_data.loc[~p04_ok_mask.values, "OBS"] = "NO EXISTE / NO SIMILAR EN PLAN (NO PASA A P04)"
 
-# ✅ conteo excluidos (para warning)
 faltan_codigo_curso = int((~p04_ok_mask).sum())
 
 p04_data = pd.DataFrame({
@@ -1420,11 +1478,8 @@ p04_data = pd.DataFrame({
     "TipoMatricula": tipo_matricula_series,
 })
 
-# ✅ Si no existe / no similar en ese plan, NO se incluye en P04
 p04_data = p04_data.loc[p04_ok_mask.values].copy()
-
 p05_source = p03_data.copy()
-
 
 # =========================
 # Render previews + Export
