@@ -368,6 +368,8 @@ def build_multi_sheet_excel(sheets: Dict[str, pd.DataFrame]) -> bytes:
                 "Solución: instala xlsxwriter:\n"
                 "   pip install -U xlsxwriter\n"
             )
+
+
 def resolve_course_name_and_origin(pl2: pd.DataFrame, carrera_key: str, plan_key: str, cod_curso_key: str) -> Tuple[str, str, str]:
     carrera_key = "" if carrera_key is None else str(carrera_key).strip()
     plan_key = "" if plan_key is None else str(plan_key).strip()
@@ -1491,10 +1493,11 @@ p03_data.loc[~p04_ok_mask.values, "OBS"] = "NO EXISTE / NO SIMILAR EN PLAN (NO P
 
 faltan_codigo_curso = int((~p04_ok_mask).sum())
 
+# ✅ OJO: dejo "Seccion" (sin tilde) para que matchee con el template normalmente
 p04_data = pd.DataFrame({
     "Periodo": periodo_p04,
     "CodigoAlumno": p03_codigo_alumno_from_padron,
-    "Sección": "A",
+    "Seccion": "A",
     "CodigoEscuela": codigo_escuela_series,
     "CodigoPlan": plan_codigo_series,
     "CodigoCurso": codigo_curso_series,
@@ -1502,7 +1505,25 @@ p04_data = pd.DataFrame({
 })
 
 p04_data = p04_data.loc[p04_ok_mask.values].copy()
-p05_source = p03_data.copy()
+
+# =========================
+# ✅ P05 (NUEVO): Carga de notas (misma lógica de P04) + Nota desde Curlle (P03)
+# Encabezados P05:
+# CodigoAlumno | Periodo | CodigoCurso | CodigoPlan | Nota | TipoMatricula
+# =========================
+nota_series = si_curlle_dep["nota_curlle"].fillna("").astype(str)
+
+p05_data = pd.DataFrame({
+    "CodigoAlumno": p03_codigo_alumno_from_padron,
+    "Periodo": periodo_p04,
+    "CodigoCurso": codigo_curso_series,
+    "CodigoPlan": plan_codigo_series,
+    "Nota": nota_series,
+    "TipoMatricula": tipo_matricula_series,
+})
+
+# Solo los que pasaron a P04 (tienen CodigoCurso válido)
+p05_data = p05_data.loc[p04_ok_mask.values].copy()
 
 # =========================
 # Render previews + Export
@@ -1511,6 +1532,7 @@ def _style_p03(row):
     if str(row.get("OBS", "")).strip() != "":
         return ["background-color: #fff59d"] * len(row)
     return [""] * len(row)
+
 
 c1, c2, c3 = st.columns(3)
 with c1:
@@ -1533,6 +1555,10 @@ st.subheader("P04 - Matrícula desde P03 (SOLO filas con CodigoCurso válido)")
 st.caption(f"Registros: {len(p04_data):,}")
 st.dataframe(p04_data.head(50), use_container_width=True)
 
+st.subheader("P05 - Carga de notas (SOLO filas que pasaron a P04)")
+st.caption(f"Registros: {len(p05_data):,}")
+st.dataframe(p05_data.head(50), use_container_width=True)
+
 missing_tpl = []
 for p in [P01_TEMPLATE, P02_TEMPLATE, P03_TEMPLATE, P04_TEMPLATE, P05_TEMPLATE]:
     if not p.exists():
@@ -1549,8 +1575,9 @@ p03_sheet = align_df_to_template_df(P03_TEMPLATE, p03_data)
 # ✅ FORZAR OBS en el excel descargado (aunque tu plantilla no tenga esa columna)
 # (así se puede pintar y también se ve el motivo)
 p03_sheet["OBS"] = p03_data["OBS"].fillna("").astype(str)
+
 p04_sheet = align_df_to_template_df(P04_TEMPLATE, p04_data)
-p05_sheet = align_df_to_template_df(P05_TEMPLATE, p05_source)
+p05_sheet = align_df_to_template_df(P05_TEMPLATE, p05_data)
 
 multi_excel_bytes = build_multi_sheet_excel({
     "P01": p01_sheet,
