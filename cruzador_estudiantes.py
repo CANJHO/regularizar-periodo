@@ -1545,6 +1545,10 @@ if missing_tpl:
 p01_sheet = align_df_to_template_df(P01_TEMPLATE, p01_data)
 p02_sheet = align_df_to_template_df(P02_TEMPLATE, p02_data)
 p03_sheet = align_df_to_template_df(P03_TEMPLATE, p03_data)
+
+# ✅ FORZAR OBS en el excel descargado (aunque tu plantilla no tenga esa columna)
+# (así se puede pintar y también se ve el motivo)
+p03_sheet["OBS"] = p03_data["OBS"].fillna("").astype(str)
 p04_sheet = align_df_to_template_df(P04_TEMPLATE, p04_data)
 p05_sheet = align_df_to_template_df(P05_TEMPLATE, p05_source)
 
