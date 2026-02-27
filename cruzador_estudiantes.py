@@ -110,7 +110,7 @@ def periodo_formato(val) -> str:
 
 def normalize_cod_curso_spaces(x) -> str:
     """
-    ✅ NUEVO: normaliza códigos como '10 A06' -> '10A06'
+    ✅ normaliza códigos como '10 A06' -> '10A06'
     - quita espacios internos (y cualquier whitespace)
     - upper
     """
@@ -382,14 +382,19 @@ def build_multi_sheet_excel(sheets: Dict[str, pd.DataFrame]) -> bytes:
             )
 
 
+# =========================
+# ✅ FIX A: resolver curso BLINDADO (NO global por código)
+# =========================
 def resolve_course_name_and_origin(pl2: pd.DataFrame, carrera_key: str, plan_key: str, cod_curso_key: str) -> Tuple[str, str, str]:
     carrera_key = "" if carrera_key is None else str(carrera_key).strip()
     plan_key = "" if plan_key is None else str(plan_key).strip()
     cod_curso_key = "" if cod_curso_key is None else str(cod_curso_key).strip().upper()
+    cod_curso_key = normalize_cod_curso_spaces(cod_curso_key)
 
     if cod_curso_key == "":
         return "", carrera_key, plan_key
 
+    # 1) MATCH EXACTO: (carrera + plan + codigo)
     exact = pl2[
         (pl2["carrera_key"] == carrera_key)
         & (pl2["plan_key"] == plan_key)
@@ -400,21 +405,23 @@ def resolve_course_name_and_origin(pl2: pd.DataFrame, carrera_key: str, plan_key
         curso = str(row.get("curso", "")).strip()
         return curso, carrera_key, plan_key
 
-    by_course = pl2[pl2["cod_curso_key"] == cod_curso_key].copy()
-    if len(by_course) == 0:
+    # 2) FALLBACK SEGURO: MISMO PLAN (aunque carrera no calce), pero solo si el nombre es único
+    same_plan = pl2[
+        (pl2["plan_key"] == plan_key)
+        & (pl2["cod_curso_key"] == cod_curso_key)
+    ].copy()
+
+    if len(same_plan) == 0:
         return "", carrera_key, plan_key
 
-    by_course["curso"] = by_course["curso"].fillna("").astype(str).str.strip()
-    cursos_no_vacios = [c for c in by_course["curso"].unique().tolist() if c != ""]
+    same_plan["curso"] = same_plan["curso"].fillna("").astype(str).str.strip()
+    cursos_no_vacios = [c for c in same_plan["curso"].unique().tolist() if c != ""]
     cursos_no_vacios = list(dict.fromkeys(cursos_no_vacios))
 
     if len(cursos_no_vacios) == 1:
-        chosen_curso = cursos_no_vacios[0]
-        chosen_row = by_course[by_course["curso"] == chosen_curso].iloc[0]
-        carrera_res = str(chosen_row.get("carrera_key", "")).strip()
-        plan_res = str(chosen_row.get("plan_key", "")).strip()
-        return chosen_curso, carrera_res, plan_res
+        return cursos_no_vacios[0], carrera_key, plan_key
 
+    # 3) Si es ambiguo, NO inventes
     return "", carrera_key, plan_key
 
 
@@ -599,7 +606,14 @@ def depurar_p03(
     # Normalizaciones base
     df["nota_num"] = df["nota_curlle"].map(parse_nota_to_float)
     df["cod_curso_u"] = df["cod_curso"].fillna("").astype(str).map(normalize_cod_curso_spaces)
-    df["nom_curso_u"] = df["curso_resuelto"].fillna("").astype(str).str.strip()
+
+    # ✅ FIX B (parte 1): si curso_resuelto quedó vacío, usar nombre raw del Curlle si existe
+    nom_res = df["curso_resuelto"].fillna("").astype(str).str.strip()
+    if "nom_curso_raw" in df.columns:
+        nom_raw = df["nom_curso_raw"].fillna("").astype(str).str.strip()
+        df["nom_curso_u"] = coalesce_series(nom_res, nom_raw)
+    else:
+        df["nom_curso_u"] = nom_res
 
     df["curso_base"] = df.apply(lambda r: course_base_name(r["cod_curso_u"], r["nom_curso_u"]), axis=1)
     df["curso_match_key"] = df["curso_base"].map(course_match_key)
@@ -1272,10 +1286,17 @@ for nc in need_cols:
         st.error(f"Curlle no trae la columna esperada: {nc}")
         st.stop()
 
+# ✅ FIX B (parte 2): capturar nombre de curso raw si existe en Curlle (para P04 cuando curso_resuelto queda vacío)
+cur_nomcurso_col = pick_col(cur, ["nom_curso", "nombre_curso", "curso", "nomcurso", "nom_curso_curlle", "curso_curlle"])
+if cur_nomcurso_col:
+    cur["nom_curso_raw"] = cur[cur_nomcurso_col].fillna("").astype(str).str.strip()
+else:
+    cur["nom_curso_raw"] = ""
+
 cur["cod_key"] = cur["codigo_alumno"].fillna("").astype(str).str.strip().str.upper()
 cur["periodo_fmt"] = cur["periodo"].map(periodo_formato)
 
-# ✅ CAMBIO 2 (ESPACIOS EN COD CURSO): normalizar '10 A06' -> '10A06'
+# normalizar '10 A06' -> '10A06'
 cur["cod_curso"] = cur["cod_curso"].map(normalize_cod_curso_spaces)
 
 cur["cod_curso_key"] = cur["cod_curso"].fillna("").astype(str).str.strip().str.upper()
@@ -1413,13 +1434,18 @@ si_curlle_dep = depurar_p03(
 
 p03_codigo_alumno_from_padron = si_curlle_dep[padron_cod_col].fillna("").astype(str).str.strip()
 
+# ✅ Nom. Curso: usar curso_resuelto o fallback Curlle (nom_curso_raw)
+nomcurso_out = si_curlle_dep["curso_resuelto"].fillna("").astype(str).str.strip()
+if "nom_curso_raw" in si_curlle_dep.columns:
+    nomcurso_out = coalesce_series(nomcurso_out, si_curlle_dep["nom_curso_raw"].fillna("").astype(str).str.strip())
+
 p03_data = pd.DataFrame({
     "Código Alumno": p03_codigo_alumno_from_padron,
     "Nombre Completo": si_curlle_dep["nombre_completo"],
     "Programa Academico": si_curlle_dep[padron_prog_col].fillna("").astype(str).str.strip() if padron_prog_col else "",
     "Periodo": si_curlle_dep["periodo_fmt"],
     "Cod. Curso": si_curlle_dep["cod_curso"].fillna("").astype(str).map(normalize_cod_curso_spaces),
-    "Nom. Curso": si_curlle_dep["curso_resuelto"].fillna("").astype(str).str.strip(),
+    "Nom. Curso": nomcurso_out,
     "Nota Curlle": si_curlle_dep["nota_curlle"],
     "Plan": si_curlle_dep["plan_out"],
     "Cod. Carrera": si_curlle_dep["cod_carrera_out"],
@@ -1480,12 +1506,16 @@ fix_mask = exsuf_mask | bad_mask
 if "periodo_ingreso_fmt" in si_curlle_dep.columns:
     periodo_p04.loc[fix_mask] = si_curlle_dep.loc[fix_mask, "periodo_ingreso_fmt"].fillna("").astype(str).str.strip()
 
+# ✅ FIX B (parte 3): nombre_curso para lookup: curso_resuelto o fallback Curlle
 codigo_curso_series = []
 for i in range(len(si_curlle_dep)):
     escuela = str(codigo_escuela_series.iloc[i]).strip()
     plan_final = str(plan_destino_series.iloc[i]).strip()
     codcurso = str(si_curlle_dep["cod_curso"].iloc[i]).strip()
+
     nombre_curso = str(si_curlle_dep["curso_resuelto"].iloc[i]).strip()
+    if nombre_curso == "" and ("nom_curso_raw" in si_curlle_dep.columns):
+        nombre_curso = str(si_curlle_dep["nom_curso_raw"].iloc[i]).strip()
 
     codigo_curso_series.append(
         lookup_codigo_curso_tpa(
@@ -1516,7 +1546,7 @@ p04_data = pd.DataFrame({
 
 p04_data = p04_data.loc[p04_ok_mask.values].copy()
 
-# ✅ EXTRA BLINDAJE ANTI-DUP: por si entra "10A06" repetido desde Curlle
+# ✅ EXTRA BLINDAJE ANTI-DUP
 p04_data = p04_data.drop_duplicates(
     subset=["Periodo", "CodigoAlumno", "CodigoCurso", "CodigoPlan", "TipoMatricula"],
     keep="first",
@@ -1543,6 +1573,24 @@ p05_data = p05_data.drop_duplicates(
     subset=["Periodo", "CodigoAlumno", "CodigoCurso", "CodigoPlan", "TipoMatricula", "Nota"],
     keep="first",
 ).copy()
+
+# =========================
+# ✅ DEBUG: filas que NO pasaron a P04 (sin CodigoCurso)
+# =========================
+with st.expander("🧪 Debug: filas sin CodigoCurso (no pasan a P04)"):
+    dbg = si_curlle_dep.copy()
+    dbg["codigo_curso_final"] = codigo_curso_series
+    bad = dbg[dbg["codigo_curso_final"].fillna("").astype(str).str.strip().eq("")]
+    st.write("Total sin CodigoCurso:", len(bad))
+    cols_dbg = [
+        padron_cod_col, "periodo_fmt", "cod_curso",
+        "curso_resuelto"
+    ]
+    if "nom_curso_raw" in bad.columns:
+        cols_dbg.append("nom_curso_raw")
+    cols_dbg += ["plan_out", "cod_carrera_out", "plan_sigu_alumno", "cod_programa_alumno"]
+    cols_dbg = [c for c in cols_dbg if c in bad.columns]
+    st.dataframe(bad[cols_dbg].head(200), use_container_width=True)
 
 # =========================
 # Render previews + Export
