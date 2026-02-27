@@ -108,6 +108,18 @@ def periodo_formato(val) -> str:
     return s
 
 
+def normalize_cod_curso_spaces(x) -> str:
+    """
+    ✅ NUEVO: normaliza códigos como '10 A06' -> '10A06'
+    - quita espacios internos (y cualquier whitespace)
+    - upper
+    """
+    s = "" if x is None else str(x)
+    s = s.strip().upper()
+    s = re.sub(r"\s+", "", s)
+    return s
+
+
 def pick_col(df: pd.DataFrame, candidates: List[str]) -> Optional[str]:
     """
     Busca una columna del df usando candidatos.
@@ -436,7 +448,6 @@ PROGRAMA_TO_COD = {
 FAM_ING = {"AF", "DE", "IS", "CO", "IN", "AE", "IC", "AR"}
 FAM_SALUD = {"PS", "EN", "OB", "MH"}
 
-# stopwords (para que "de", "y" no rompan el match)
 COURSE_STOPWORDS = {
     "de", "del", "la", "las", "el", "los", "y", "e", "en", "para", "por", "a", "al",
     "un", "una", "unos", "unas", "i",
@@ -534,10 +545,6 @@ def course_match_key(text: str) -> str:
     return " ".join(cleaned).strip()
 
 
-# -------------------------
-# ✅ REGLA NUEVA: Reemplazo "Redacción y Comunicación" (desde 2018-1)
-# Si existe Redacción y Comunicación en el alumno => eliminar Taller Oral y/o Taller Escrita
-# -------------------------
 REEMPLAZO_DESDE_PERIODO = "2018-1"
 
 
@@ -563,7 +570,6 @@ def _period_ge(p: str, ref: str) -> bool:
     return a >= b
 
 
-# Keys canon (usan el mismo normalizador course_match_key)
 KEY_REDA_COMU = course_match_key("Redacción y Comunicación")
 KEY_TALLER_ORAL = course_match_key("Taller de Comunicación Oral")
 KEY_TALLER_ESCRITA = course_match_key("Taller de Comunicación Escrita")
@@ -592,7 +598,7 @@ def depurar_p03(
 
     # Normalizaciones base
     df["nota_num"] = df["nota_curlle"].map(parse_nota_to_float)
-    df["cod_curso_u"] = df["cod_curso"].fillna("").astype(str).str.strip().str.upper()
+    df["cod_curso_u"] = df["cod_curso"].fillna("").astype(str).map(normalize_cod_curso_spaces)
     df["nom_curso_u"] = df["curso_resuelto"].fillna("").astype(str).str.strip()
 
     df["curso_base"] = df.apply(lambda r: course_base_name(r["cod_curso_u"], r["nom_curso_u"]), axis=1)
@@ -602,19 +608,20 @@ def depurar_p03(
     # fallback si quedó vacío
     df.loc[df["curso_match_key"].eq(""), "curso_match_key"] = df["cod_curso_u"].fillna("").astype(str).str.strip()
 
-    # Regla: si en alumno+curso hay alguna nota >0 => eliminar notas 0 del mismo grupo
+    # ✅ CAMBIO 1 (HISTÓRICO):
+    # Si en alumno+periodo+curso hay alguna nota >0 => eliminar notas 0 del MISMO PERIODO (no cruza años)
     df["_nota_safe"] = df["nota_num"].where(~df["nota_num"].isna(), -1)
 
     has_real_positive = (
         (df["_nota_safe"] > 0)
-        .groupby([df["alumno_key"], df["curso_match_key"]])
+        .groupby([df["alumno_key"], df["periodo_u"], df["curso_match_key"]])
         .any()
         .to_dict()
     )
 
     drop_zero = []
     for idx, row in df.iterrows():
-        key = (row["alumno_key"], row["curso_match_key"])
+        key = (row["alumno_key"], row["periodo_u"], row["curso_match_key"])
         cond_has_real = bool(has_real_positive.get(key, False))
         cond_is_zero = (row["_nota_safe"] == 0)
         drop_zero.append(cond_has_real and cond_is_zero)
@@ -741,7 +748,7 @@ def escuela_from_programa(programa: str) -> str:
 
 
 def tipo_matricula_from_codcurso(cod_curso: str) -> str:
-    c = "" if cod_curso is None else str(cod_curso).strip().upper()
+    c = normalize_cod_curso_spaces(cod_curso)
     return "EXSUF" if c.startswith("EXSUF") else "R"
 
 
@@ -955,7 +962,7 @@ def lookup_codigo_curso_tpa(tpa_map: pd.DataFrame, escuela: str, plan: str, codc
     e = "" if escuela is None else str(escuela).strip()
     p = "" if plan is None else str(plan).strip()
 
-    c_raw = "" if codcurso is None else str(codcurso).strip().upper()
+    c_raw = normalize_cod_curso_spaces(codcurso)
     c = _clean_codcurso(c_raw)
 
     if e == "" or p == "":
@@ -1267,6 +1274,10 @@ for nc in need_cols:
 
 cur["cod_key"] = cur["codigo_alumno"].fillna("").astype(str).str.strip().str.upper()
 cur["periodo_fmt"] = cur["periodo"].map(periodo_formato)
+
+# ✅ CAMBIO 2 (ESPACIOS EN COD CURSO): normalizar '10 A06' -> '10A06'
+cur["cod_curso"] = cur["cod_curso"].map(normalize_cod_curso_spaces)
+
 cur["cod_curso_key"] = cur["cod_curso"].fillna("").astype(str).str.strip().str.upper()
 cur["plan_key"] = cur["plan"].fillna("").astype(str).str.strip()
 cur["carrera_key"] = cur["cod_carrera"].fillna("").astype(str).str.strip()
@@ -1282,7 +1293,7 @@ pl2["archivo"] = pl2["archivo"].fillna("").astype(str).str.strip()
 ex = pl2["archivo"].str.extract(r"^(?P<carrera>[A-Za-z]{1,6})-(?P<plan>\d{3,10})", expand=True)
 pl2["carrera_key"] = ex["carrera"].fillna("").astype(str).str.strip()
 pl2["plan_key"] = ex["plan"].fillna("").astype(str).str.strip()
-pl2["cod_curso_key"] = pl2["codigo"].fillna("").astype(str).str.strip().str.upper()
+pl2["cod_curso_key"] = pl2["codigo"].fillna("").astype(str).str.strip().str.upper().map(normalize_cod_curso_spaces)
 pl2["curso"] = pl2["curso"].fillna("").astype(str).str.strip()
 
 # =========================
@@ -1368,7 +1379,7 @@ p02_data = pd.DataFrame({
 # =========================
 si_curlle["carrera_key"] = si_curlle["carrera_key"].fillna("").astype(str).str.strip()
 si_curlle["plan_key"] = si_curlle["plan_key"].fillna("").astype(str).str.strip()
-si_curlle["cod_curso_key"] = si_curlle["cod_curso_key"].fillna("").astype(str).str.strip().str.upper()
+si_curlle["cod_curso_key"] = si_curlle["cod_curso_key"].fillna("").astype(str).map(normalize_cod_curso_spaces)
 
 resolved_curso, resolved_carrera, resolved_plan = [], [], []
 for _, row in si_curlle.iterrows():
@@ -1407,7 +1418,7 @@ p03_data = pd.DataFrame({
     "Nombre Completo": si_curlle_dep["nombre_completo"],
     "Programa Academico": si_curlle_dep[padron_prog_col].fillna("").astype(str).str.strip() if padron_prog_col else "",
     "Periodo": si_curlle_dep["periodo_fmt"],
-    "Cod. Curso": si_curlle_dep["cod_curso"],
+    "Cod. Curso": si_curlle_dep["cod_curso"].fillna("").astype(str).map(normalize_cod_curso_spaces),
     "Nom. Curso": si_curlle_dep["curso_resuelto"].fillna("").astype(str).str.strip(),
     "Nota Curlle": si_curlle_dep["nota_curlle"],
     "Plan": si_curlle_dep["plan_out"],
@@ -1462,7 +1473,7 @@ tipo_matricula_series = si_curlle_dep["cod_curso"].map(tipo_matricula_from_codcu
 
 # ✅ Periodo P04:
 periodo_p04 = si_curlle_dep["periodo_fmt"].fillna("").astype(str).str.strip().copy()
-exsuf_mask = si_curlle_dep["cod_curso"].fillna("").astype(str).str.strip().str.upper().str.startswith("EXSUF")
+exsuf_mask = si_curlle_dep["cod_curso"].fillna("").astype(str).map(normalize_cod_curso_spaces).str.startswith("EXSUF")
 bad_mask = periodo_p04.isin(["#¿NOMBRE?", "221"])
 fix_mask = exsuf_mask | bad_mask
 
@@ -1493,7 +1504,6 @@ p03_data.loc[~p04_ok_mask.values, "OBS"] = "NO EXISTE / NO SIMILAR EN PLAN (NO P
 
 faltan_codigo_curso = int((~p04_ok_mask).sum())
 
-# ✅ OJO: dejo "Seccion" (sin tilde) para que matchee con el template normalmente
 p04_data = pd.DataFrame({
     "Periodo": periodo_p04,
     "CodigoAlumno": p03_codigo_alumno_from_padron,
@@ -1506,10 +1516,14 @@ p04_data = pd.DataFrame({
 
 p04_data = p04_data.loc[p04_ok_mask.values].copy()
 
+# ✅ EXTRA BLINDAJE ANTI-DUP: por si entra "10A06" repetido desde Curlle
+p04_data = p04_data.drop_duplicates(
+    subset=["Periodo", "CodigoAlumno", "CodigoCurso", "CodigoPlan", "TipoMatricula"],
+    keep="first",
+).copy()
+
 # =========================
-# ✅ P05 (NUEVO): Carga de notas (misma lógica de P04) + Nota desde Curlle (P03)
-# Encabezados P05:
-# CodigoAlumno | Periodo | CodigoCurso | CodigoPlan | Nota | TipoMatricula
+# ✅ P05 (Carga de notas)
 # =========================
 nota_series = si_curlle_dep["nota_curlle"].fillna("").astype(str)
 
@@ -1522,8 +1536,13 @@ p05_data = pd.DataFrame({
     "TipoMatricula": tipo_matricula_series,
 })
 
-# Solo los que pasaron a P04 (tienen CodigoCurso válido)
 p05_data = p05_data.loc[p04_ok_mask.values].copy()
+
+# ✅ EXTRA BLINDAJE ANTI-DUP
+p05_data = p05_data.drop_duplicates(
+    subset=["Periodo", "CodigoAlumno", "CodigoCurso", "CodigoPlan", "TipoMatricula", "Nota"],
+    keep="first",
+).copy()
 
 # =========================
 # Render previews + Export
@@ -1573,7 +1592,6 @@ p02_sheet = align_df_to_template_df(P02_TEMPLATE, p02_data)
 p03_sheet = align_df_to_template_df(P03_TEMPLATE, p03_data)
 
 # ✅ FORZAR OBS en el excel descargado (aunque tu plantilla no tenga esa columna)
-# (así se puede pintar y también se ve el motivo)
 p03_sheet["OBS"] = p03_data["OBS"].fillna("").astype(str)
 
 p04_sheet = align_df_to_template_df(P04_TEMPLATE, p04_data)
