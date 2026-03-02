@@ -917,39 +917,6 @@ def _roman_level_compatible(target_name: str, cand_name: str) -> bool:
         return lc == lt
     return lc == ""
 
-def _name_like_ok(target_name: str, cand_name: str, min_ratio: float = 0.78) -> bool:
-    """
-    Valida que el nombre del curso sea compatible.
-    - compara course_name_key exacta, si no:
-    - compara similitud difflib (con tildes normalizadas)
-    - además exige compatibilidad de nivel romano (II/III/IV...)
-    """
-    t_raw = "" if target_name is None else str(target_name).strip()
-    c_raw = "" if cand_name is None else str(cand_name).strip()
-
-    if t_raw == "" or c_raw == "":
-        return False
-
-    # blindaje niveles romanos
-    if not _roman_level_compatible(t_raw, c_raw):
-        return False
-
-    tk = _course_name_key(t_raw)
-    ck = _course_name_key(c_raw)
-
-    # match fuerte por key
-    if tk != "" and tk == ck:
-        return True
-
-    # match por similitud (más tolerante)
-    t = norm_text_keep_spaces(t_raw)
-    c = norm_text_keep_spaces(c_raw)
-
-    if t == "" or c == "":
-        return False
-
-    ratio = difflib.SequenceMatcher(None, t, c).ratio()
-    return ratio >= min_ratio
 
 
 def _best_fuzzy_match_code(same_plan_df: pd.DataFrame, nombre_curso: str, min_ratio: float = 0.86) -> str:
@@ -988,13 +955,10 @@ def _best_fuzzy_match_code(same_plan_df: pd.DataFrame, nombre_curso: str, min_ra
 
 def lookup_codigo_curso_tpa(tpa_map: pd.DataFrame, escuela: str, plan: str, codcurso: str, nombre_curso: str) -> str:
     """
-    Regla (CORREGIDA):
-    - Si NO es EXSUF:
-        A) intenta por código exacto PERO solo si el NOMBRE también calza (anti-colisión 10A06).
-        B) si falla, intenta por nombre key exacta
-        C) si falla, fuzzy por parecido (mismo plan) con blindaje por nivel romano
-    - Si ES EXSUF:
-        no buscar por código, solo nombre key y luego fuzzy
+    Regla:
+    - Si NO es EXSUF: intenta match exacto por codcurso_key; si falla, por nombre key; si falla, fuzzy.
+    - Si ES EXSUF: NO intentes por código (EXSUFxxIN no existe en TPA como codcurso_key),
+      intenta por nombre (key) y luego fuzzy.
     """
     e = "" if escuela is None else str(escuela).strip()
     p = "" if plan is None else str(plan).strip()
@@ -1011,44 +975,26 @@ def lookup_codigo_curso_tpa(tpa_map: pd.DataFrame, escuela: str, plan: str, codc
 
     is_exsuf = c_raw.startswith("EXSUF")
 
-    # ---------------------------------------------------
-    # 1) exact por código (SOLO si NO es EXSUF)
-    #    ✅ NUEVO: validar NOMBRE para evitar colisiones
-    # ---------------------------------------------------
+    # 1) exact por código (solo si NO es EXSUF)
     if (not is_exsuf) and c != "":
         exact = same_plan[same_plan["codcurso_key"] == c]
         if len(exact) > 0:
-            cand_name = str(exact.iloc[0].get("curso_raw", "")).strip()
+            return str(exact.iloc[0]["codigo_raw"]).strip()
 
-            # ✅ si el nombre NO calza, NO aceptes el match por código
-            if _name_like_ok(nombre_curso, cand_name, min_ratio=0.78):
-                return str(exact.iloc[0]["codigo_raw"]).strip()
-            # si no calza, seguimos buscando por nombre
-
-    # ---------------------------------------------------
     # 2) exact por nombre normalizado (key)
-    # ---------------------------------------------------
     nk = _course_name_key(nombre_curso)
     if nk != "":
         same_plan2 = same_plan[same_plan["curso_name_key"] == nk]
         if len(same_plan2) > 0:
             return str(same_plan2.iloc[0]["codigo_raw"]).strip()
 
-    # ---------------------------------------------------
     # 3) fuzzy por parecido dentro del MISMO plan (blindado por nivel romano)
-    # ---------------------------------------------------
     fb = _best_fuzzy_match_code(same_plan, nombre_curso=nombre_curso, min_ratio=0.86)
     if fb:
-        # ✅ doble seguro: validar que el candidato fuzzy también sea compatible por nombre
-        cand = same_plan[same_plan["codigo_raw"].astype(str).str.strip() == fb]
-        if len(cand) > 0:
-            cand_name = str(cand.iloc[0].get("curso_raw", "")).strip()
-            if _name_like_ok(nombre_curso, cand_name, min_ratio=0.78):
-                return fb
-        else:
-            return fb
+        return fb
 
     return ""
+
 
 # =========================
 # ✅ Cache robusto (por HASH)
