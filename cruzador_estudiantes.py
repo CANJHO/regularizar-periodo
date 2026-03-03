@@ -1476,6 +1476,43 @@ si_curlle["plan_out"] = si_curlle["plan"].fillna("").astype(str).str.strip()
 mask_override = si_curlle["curso_resuelto"].fillna("").astype(str).str.strip() != ""
 si_curlle.loc[mask_override, "cod_carrera_out"] = si_curlle.loc[mask_override, "carrera_resuelta"].fillna("").astype(str).str.strip()
 si_curlle.loc[mask_override, "plan_out"] = si_curlle.loc[mask_override, "plan_resuelto"].fillna("").astype(str).str.strip()
+
+# =========================
+# ✅ MAPA: sufijo correcto para Curso Conva (ANTES de depurar)
+# Usa el cod_carrera del "curso origen" tipo 24A01 cuando exista
+# =========================
+def _looks_like_regular_course_code(x: str) -> bool:
+    s = normalize_cod_curso_spaces(x)
+    return bool(re.fullmatch(r"\d{2,3}[A-Z]\d{2}", s))
+
+_tmp = si_curlle.copy()
+
+_tmp["curso_conva_k"] = _tmp["curso_conva"].fillna("").astype(str).map(normalize_cod_curso_spaces)
+_tmp["resol_conva_k"] = _tmp["resol_conva"].fillna("").astype(str).str.strip()
+_tmp["cod_carrera_k"] = _tmp["cod_carrera"].fillna("").astype(str).str.strip()
+_tmp["cod_curso_k"] = _tmp["cod_curso"].fillna("").astype(str).map(normalize_cod_curso_spaces)
+
+grp_cols = ["cod_key", "periodo_fmt", "curso_conva_k", "resol_conva_k"]
+
+def _pick_best_conva_suffix(g: pd.DataFrame) -> str:
+    # 1) Preferir cod_carrera de fila con cod_curso tipo 24A01/25A01/etc.
+    g1 = g[g["cod_curso_k"].map(_looks_like_regular_course_code) & g["cod_carrera_k"].ne("")]
+    if len(g1) > 0:
+        return str(g1.iloc[0]["cod_carrera_k"]).strip()
+
+    # 2) Fallback: primer cod_carrera no vacío
+    g2 = g[g["cod_carrera_k"].ne("")]
+    if len(g2) > 0:
+        return str(g2.iloc[0]["cod_carrera_k"]).strip()
+
+    return ""
+
+conva_suffix_map = (
+    _tmp.groupby(grp_cols, dropna=False, sort=False)
+        .apply(_pick_best_conva_suffix)
+        .to_dict()
+)
+
 step(85, "Depurando P03 y generando P04/P05...")
 si_curlle_dep = depurar_p03(
     si_df=si_curlle,
@@ -1514,12 +1551,30 @@ resol_conva_series = (
     if "resol_conva" in si_curlle_dep.columns
     else pd.Series([""] * len(si_curlle_dep), index=si_curlle_dep.index)
 )
-# ✅ CONCATENAR Curso Conva + "-" + Cod. Carrera SOLO si Curso Conva parece código (ej: 25A01)
-# Nota: en tu df si_curlle_dep, la columna ya existe como 'cod_carrera' (por tu validación need_cols)
-cod_carrera_series = (
-    si_curlle_dep["cod_carrera"].fillna("").astype(str).str.strip()
-    if "cod_carrera" in si_curlle_dep.columns
-    else pd.Series([""] * len(si_curlle_dep), index=si_curlle_dep.index)
+# ✅ CONCATENAR Curso Conva + "-" + SUFIJO CORRECTO (del grupo de convalidación, NO de la fila depurada)
+
+curso_conva_norm = curso_conva_series.fillna("").astype(str).map(normalize_cod_curso_spaces)
+resol_conva_norm = resol_conva_series.fillna("").astype(str).str.strip()
+
+# Detecta códigos tipo 14A08, 21A13, 25A01 (2-3 dígitos + letra + 2 dígitos)
+is_codcurso_conva = curso_conva_norm.str.match(r"^\d{2,3}[A-Z]\d{2}$", na=False)
+
+def _get_conva_suffix(row) -> str:
+    key = (
+        str(row.get("cod_key", "")).strip().upper(),
+        str(row.get("periodo_fmt", "")).strip(),
+        str(row.get("curso_conva", "")).strip().upper().replace(" ", ""),
+        str(row.get("resol_conva", "")).strip(),
+    )
+    return str(conva_suffix_map.get(key, "")).strip()
+
+conva_suffix_series = si_curlle_dep.apply(_get_conva_suffix, axis=1).fillna("").astype(str).str.strip()
+
+mask_concat = is_codcurso_conva & conva_suffix_series.ne("")
+
+curso_conva_series = curso_conva_series.copy()
+curso_conva_series.loc[mask_concat] = (
+    curso_conva_norm.loc[mask_concat] + "-" + conva_suffix_series.loc[mask_concat]
 )
 
 # Normaliza (quita espacios internos, upper) para evaluar patrón
