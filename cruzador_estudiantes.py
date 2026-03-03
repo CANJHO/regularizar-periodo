@@ -1449,16 +1449,23 @@ _tmp = si_curlle.copy()
 
 _tmp["curso_conva_k"] = _tmp["curso_conva"].fillna("").astype(str).map(normalize_cod_curso_spaces)
 _tmp["resol_conva_k"] = _tmp["resol_conva"].fillna("").astype(str).str.strip()
-_tmp["cod_carrera_k"] = _tmp["cod_carrera"].fillna("").astype(str).str.strip()
 _tmp["cod_curso_k"] = _tmp["cod_curso"].fillna("").astype(str).map(normalize_cod_curso_spaces)
 
-grp_cols = ["cod_key", "periodo_fmt", "curso_conva_k", "resol_conva_k"]
+# ✅ AQUI ESTA EL CAMBIO: usar cod_carrera_out (origen resuelto), no cod_carrera crudo
+if "cod_carrera_out" in _tmp.columns:
+    _tmp["cod_carrera_k"] = _tmp["cod_carrera_out"].fillna("").astype(str).str.strip()
+else:
+    _tmp["cod_carrera_k"] = _tmp["cod_carrera"].fillna("").astype(str).str.strip()
+
+grp_cols = ["cod_key", "curso_conva_k", "resol_conva_k"]  # ✅ sin periodo (más estable)
 
 def _pick_best_conva_suffix(g: pd.DataFrame) -> str:
+    # 1) Preferir fila donde el curso "origen" es regular tipo 24A01 / 25A01
     g1 = g[g["cod_curso_k"].map(_looks_like_regular_course_code) & g["cod_carrera_k"].ne("")]
     if len(g1) > 0:
         return str(g1.iloc[0]["cod_carrera_k"]).strip()
 
+    # 2) Fallback: primer cod_carrera_k no vacío
     g2 = g[g["cod_carrera_k"].ne("")]
     if len(g2) > 0:
         return str(g2.iloc[0]["cod_carrera_k"]).strip()
