@@ -1136,6 +1136,17 @@ if not padron_file:
 
 if not run_btn:
     st.stop()
+# =========================
+# ✅ BARRA DE PROGRESO (ANTI-CUELGUE)
+# =========================
+progress = st.progress(0, text="Iniciando...")
+status = st.empty()
+
+def step(p: int, msg: str):
+    progress.progress(p, text=msg)
+    status.info(msg)
+
+step(5, "Validando archivos base...")    
 
 if not akademic_file and not DEFAULT_AKADEMIC.exists():
     st.error(f"No encuentro {DEFAULT_AKADEMIC.name} en la raíz. Marca override y súbelo.")
@@ -1163,6 +1174,7 @@ if padron_file and padron_file.name.lower().endswith((".xlsx", ".xls")):
 # =========================
 # Load Padrón (estable)
 # =========================
+step(15, "Leyendo PADRÓN...")
 with st.spinner("Leyendo PADRÓN..."):
     if padron_file.name.lower().endswith(".csv"):
         padron = pd.read_csv(padron_file, dtype=str, encoding="utf-8-sig")
@@ -1203,7 +1215,7 @@ periodo_ingreso_candidates = [
     "ingreso", "per_ingreso", "per_ing", "periodoingreso",
     "periodo_academico_ingreso", "periodoacademico_ingreso"
 ]
-
+step(30, "Detectando columnas del padrón...")
 padron_dni_col = pick_col(padron, dni_candidates)
 padron_cod_col = pick_col(padron, cod_candidates)
 padron_prog_col = pick_col(padron, prog_candidates)
@@ -1260,6 +1272,7 @@ else:
 # =========================
 # Load bases (estable)
 # =========================
+step(45, "Leyendo bases (Akademic / Planes / Todos Planes / Curlle)...")
 with st.spinner("Leyendo bases (Akademic / Planes / Todos Planes / Curlle)..."):
 
     if akademic_file:
@@ -1285,7 +1298,7 @@ with st.spinner("Leyendo bases (Akademic / Planes / Todos Planes / Curlle)..."):
         cur = _cached_read_curlle_bytes(b, _hash_bytes(b))
     else:
         cur = _cached_read_curlle_path(str(DEFAULT_CURLLE))
-
+step(55, "Construyendo mapa de TODOS_PLANES_AKADEMIC...")
 try:
     tpa_map = build_todos_planes_akademic_map(tpa)
 except Exception as e:
@@ -1354,6 +1367,7 @@ pl2["curso"] = pl2["curso"].fillna("").astype(str).str.strip()
 # =========================
 # 1) Cruce con Akademic (P01) por DNI O COD
 # =========================
+step(65, "Cruce con Akademic (P01)...")
 m1 = padron.merge(ak_by_dni, how="left", on="dni_key", suffixes=("", "_akdni"))
 m2 = m1.merge(ak_by_cod, how="left", on="cod_key", suffixes=("", "_akcod"))
 
@@ -1395,6 +1409,7 @@ p01_data = pd.DataFrame({
 # =========================
 # 2) Cruce no akademic vs Curlle (P02 / P03)
 # =========================
+step(75, "Cruce con Curlle (P02/P03)...")
 no_ak_basic = no_ak.copy()
 no_ak_basic["nombre_completo"] = no_ak_basic["nombre_completo_calc"]
 
@@ -1458,7 +1473,7 @@ si_curlle["plan_out"] = si_curlle["plan"].fillna("").astype(str).str.strip()
 mask_override = si_curlle["curso_resuelto"].fillna("").astype(str).str.strip() != ""
 si_curlle.loc[mask_override, "cod_carrera_out"] = si_curlle.loc[mask_override, "carrera_resuelta"].fillna("").astype(str).str.strip()
 si_curlle.loc[mask_override, "plan_out"] = si_curlle.loc[mask_override, "plan_resuelto"].fillna("").astype(str).str.strip()
-
+step(85, "Depurando P03 y generando P04/P05...")
 si_curlle_dep = depurar_p03(
     si_df=si_curlle,
     padron_prog_col=padron_prog_col,
@@ -1659,6 +1674,7 @@ p03_sheet["OBS"] = p03_data["OBS"].fillna("").astype(str)
 p04_sheet = align_df_to_template_df(P04_TEMPLATE, p04_data)
 p05_sheet = align_df_to_template_df(P05_TEMPLATE, p05_data)
 
+step(95, "Generando Excel final (P01–P05)...")
 multi_excel_bytes = build_multi_sheet_excel({
     "P01": p01_sheet,
     "P02": p02_sheet,
@@ -1684,4 +1700,5 @@ if faltan_codigo_curso > 0:
         f"Revisa P03 columna OBS (se pinta amarillo)."
     )
 
-st.success("Listo ✅ Descargable único generado con hojas P01, P02, P03, P04 y P05.")
+step(100, "Listo ✅")
+status.success("Proceso terminado. Ya puedes descargar el Excel.")
