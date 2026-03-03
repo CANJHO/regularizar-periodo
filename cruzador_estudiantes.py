@@ -110,7 +110,7 @@ def periodo_formato(val) -> str:
 
 def normalize_cod_curso_spaces(x) -> str:
     """
-    ✅ NUEVO: normaliza códigos como '10 A06' -> '10A06'
+    ✅ normaliza códigos como '10 A06' -> '10A06'
     - quita espacios internos (y cualquier whitespace)
     - upper
     """
@@ -366,8 +366,6 @@ def build_multi_sheet_excel(sheets: Dict[str, pd.DataFrame]) -> bytes:
     except Exception as e1:
         bio = io.BytesIO()
         try:
-            # ⚠️ Fallback: xlsxwriter NO aplica estilos con openpyxl PatternFill
-            # (pero sirve para no romper la descarga si openpyxl falla)
             with pd.ExcelWriter(bio, engine="xlsxwriter") as writer:
                 for sh, df in safe_sheets.items():
                     df.to_excel(writer, index=False, sheet_name=sh)
@@ -608,8 +606,8 @@ def depurar_p03(
     # fallback si quedó vacío
     df.loc[df["curso_match_key"].eq(""), "curso_match_key"] = df["cod_curso_u"].fillna("").astype(str).str.strip()
 
-    # ✅ CAMBIO 1 (HISTÓRICO):
-    # Si en alumno+periodo+curso hay alguna nota >0 => eliminar notas 0 del MISMO PERIODO (no cruza años)
+    # ✅ HISTÓRICO:
+    # Si en alumno+periodo+curso hay alguna nota >0 => eliminar notas 0 del MISMO PERIODO
     df["_nota_safe"] = df["nota_num"].where(~df["nota_num"].isna(), -1)
 
     has_real_positive = (
@@ -886,10 +884,6 @@ ROMAN_LEVELS = {"i", "ii", "iii", "iv", "v", "vi", "vii", "viii", "ix", "x"}
 
 
 def _extract_roman_level(name: str) -> str:
-    """
-    Devuelve el nivel romano encontrado (i/ii/iii/iv...) si está como token.
-    Si no hay, devuelve "".
-    """
     t = norm_text_keep_spaces(name)
     if not t:
         return ""
@@ -906,42 +900,29 @@ def _extract_roman_level(name: str) -> str:
 
 
 def _roman_level_compatible(target_name: str, cand_name: str) -> bool:
-    """
-    Reglas:
-    - Si target tiene nivel (II/III/IV...), el candidato DEBE tener el MISMO.
-    - Si target NO tiene nivel, el candidato tampoco debe tener.
-    """
     lt = _extract_roman_level(target_name)
     lc = _extract_roman_level(cand_name)
     if lt:
         return lc == lt
     return lc == ""
 
+
 def _name_like_ok(target_name: str, cand_name: str, min_ratio: float = 0.78) -> bool:
-    """
-    Valida que el nombre del curso sea compatible.
-    - compara course_name_key exacta, si no:
-    - compara similitud difflib (con tildes normalizadas)
-    - además exige compatibilidad de nivel romano (II/III/IV...)
-    """
     t_raw = "" if target_name is None else str(target_name).strip()
     c_raw = "" if cand_name is None else str(cand_name).strip()
 
     if t_raw == "" or c_raw == "":
         return False
 
-    # blindaje niveles romanos
     if not _roman_level_compatible(t_raw, c_raw):
         return False
 
     tk = _course_name_key(t_raw)
     ck = _course_name_key(c_raw)
 
-    # match fuerte por key
     if tk != "" and tk == ck:
         return True
 
-    # match por similitud (más tolerante)
     t = norm_text_keep_spaces(t_raw)
     c = norm_text_keep_spaces(c_raw)
 
@@ -953,11 +934,6 @@ def _name_like_ok(target_name: str, cand_name: str, min_ratio: float = 0.78) -> 
 
 
 def _best_fuzzy_match_code(same_plan_df: pd.DataFrame, nombre_curso: str, min_ratio: float = 0.86) -> str:
-    """
-    Mejor match por parecido (difflib) dentro del MISMO plan.
-    ✅ BLINDADO: NO permite match si el nivel romano no coincide (II/III/IV...).
-    Devuelve codigo_raw si supera umbral.
-    """
     target_raw = "" if nombre_curso is None else str(nombre_curso)
     target = norm_text_keep_spaces(target_raw)
     if target == "":
@@ -972,7 +948,6 @@ def _best_fuzzy_match_code(same_plan_df: pd.DataFrame, nombre_curso: str, min_ra
         if cand == "":
             continue
 
-        # ✅ BLINDAJE: nivel romano debe ser compatible
         if not _roman_level_compatible(target_raw, cand_raw):
             continue
 
@@ -987,15 +962,6 @@ def _best_fuzzy_match_code(same_plan_df: pd.DataFrame, nombre_curso: str, min_ra
 
 
 def lookup_codigo_curso_tpa(tpa_map: pd.DataFrame, escuela: str, plan: str, codcurso: str, nombre_curso: str) -> str:
-    """
-    Regla (CORREGIDA):
-    - Si NO es EXSUF:
-        A) intenta por código exacto PERO solo si el NOMBRE también calza (anti-colisión 10A06).
-        B) si falla, intenta por nombre key exacta
-        C) si falla, fuzzy por parecido (mismo plan) con blindaje por nivel romano
-    - Si ES EXSUF:
-        no buscar por código, solo nombre key y luego fuzzy
-    """
     e = "" if escuela is None else str(escuela).strip()
     p = "" if plan is None else str(plan).strip()
 
@@ -1011,35 +977,24 @@ def lookup_codigo_curso_tpa(tpa_map: pd.DataFrame, escuela: str, plan: str, codc
 
     is_exsuf = c_raw.startswith("EXSUF")
 
-    # ---------------------------------------------------
-    # 1) exact por código (SOLO si NO es EXSUF)
-    #    ✅ NUEVO: validar NOMBRE para evitar colisiones
-    # ---------------------------------------------------
+    # 1) exact por código (NO EXSUF) + validar nombre
     if (not is_exsuf) and c != "":
         exact = same_plan[same_plan["codcurso_key"] == c]
         if len(exact) > 0:
             cand_name = str(exact.iloc[0].get("curso_raw", "")).strip()
-
-            # ✅ si el nombre NO calza, NO aceptes el match por código
             if _name_like_ok(nombre_curso, cand_name, min_ratio=0.78):
                 return str(exact.iloc[0]["codigo_raw"]).strip()
-            # si no calza, seguimos buscando por nombre
 
-    # ---------------------------------------------------
-    # 2) exact por nombre normalizado (key)
-    # ---------------------------------------------------
+    # 2) exact por nombre key
     nk = _course_name_key(nombre_curso)
     if nk != "":
         same_plan2 = same_plan[same_plan["curso_name_key"] == nk]
         if len(same_plan2) > 0:
             return str(same_plan2.iloc[0]["codigo_raw"]).strip()
 
-    # ---------------------------------------------------
-    # 3) fuzzy por parecido dentro del MISMO plan (blindado por nivel romano)
-    # ---------------------------------------------------
+    # 3) fuzzy por parecido
     fb = _best_fuzzy_match_code(same_plan, nombre_curso=nombre_curso, min_ratio=0.86)
     if fb:
-        # ✅ doble seguro: validar que el candidato fuzzy también sea compatible por nombre
         cand = same_plan[same_plan["codigo_raw"].astype(str).str.strip() == fb]
         if len(cand) > 0:
             cand_name = str(cand.iloc[0].get("curso_raw", "")).strip()
@@ -1049,6 +1004,7 @@ def lookup_codigo_curso_tpa(tpa_map: pd.DataFrame, escuela: str, plan: str, codc
             return fb
 
     return ""
+
 
 # =========================
 # ✅ Cache robusto (por HASH)
@@ -1081,7 +1037,7 @@ def _cached_read_curlle_path(path_str: str) -> pd.DataFrame:
 # UI
 # =========================
 st.set_page_config(page_title="Regularización AKA", layout="wide")
-st.title("📌 Regularización AKA - Generador de Plantillas")
+st.title("📌 Regularización AKA- Generador de Plantillas")
 
 st.markdown(
     """
@@ -1136,6 +1092,7 @@ if not padron_file:
 
 if not run_btn:
     st.stop()
+
 # =========================
 # ✅ BARRA DE PROGRESO (ANTI-CUELGUE)
 # =========================
@@ -1146,7 +1103,7 @@ def step(p: int, msg: str):
     progress.progress(p, text=msg)
     status.info(msg)
 
-step(5, "Validando archivos base...")    
+step(5, "Validando archivos base...")
 
 if not akademic_file and not DEFAULT_AKADEMIC.exists():
     st.error(f"No encuentro {DEFAULT_AKADEMIC.name} en la raíz. Marca override y súbelo.")
@@ -1215,6 +1172,7 @@ periodo_ingreso_candidates = [
     "ingreso", "per_ingreso", "per_ing", "periodoingreso",
     "periodo_academico_ingreso", "periodoacademico_ingreso"
 ]
+
 step(30, "Detectando columnas del padrón...")
 padron_dni_col = pick_col(padron, dni_candidates)
 padron_cod_col = pick_col(padron, cod_candidates)
@@ -1245,7 +1203,10 @@ else:
         ["apellidos_y_nombres", "apellidos_nombres", "apellido_y_nombres",
          "nombre_completo", "fullname", "full_name", "nombres_completos"]
     )
-    padron["nombre_completo_calc"] = padron[nc].fillna("").astype(str).str.strip() if nc else ""
+    if nc:
+        padron["nombre_completo_calc"] = padron[nc].fillna("").astype(str).str.strip()
+    else:
+        padron["nombre_completo_calc"] = pd.Series([""] * len(padron), index=padron.index)
 
 # PLAN-SIGU
 padron_plan_sigu_col = pick_col(
@@ -1298,6 +1259,7 @@ with st.spinner("Leyendo bases (Akademic / Planes / Todos Planes / Curlle)..."):
         cur = _cached_read_curlle_bytes(b, _hash_bytes(b))
     else:
         cur = _cached_read_curlle_path(str(DEFAULT_CURLLE))
+
 step(55, "Construyendo mapa de TODOS_PLANES_AKADEMIC...")
 try:
     tpa_map = build_todos_planes_akademic_map(tpa)
@@ -1346,9 +1308,7 @@ for nc in need_cols:
 cur["cod_key"] = cur["codigo_alumno"].fillna("").astype(str).str.strip().str.upper()
 cur["periodo_fmt"] = cur["periodo"].map(periodo_formato)
 
-# ✅ CAMBIO 2 (ESPACIOS EN COD CURSO): normalizar '10 A06' -> '10A06'
 cur["cod_curso"] = cur["cod_curso"].map(normalize_cod_curso_spaces)
-
 cur["cod_curso_key"] = cur["cod_curso"].fillna("").astype(str).str.strip().str.upper()
 cur["plan_key"] = cur["plan"].fillna("").astype(str).str.strip()
 cur["carrera_key"] = cur["cod_carrera"].fillna("").astype(str).str.strip()
@@ -1495,12 +1455,10 @@ _tmp["cod_curso_k"] = _tmp["cod_curso"].fillna("").astype(str).map(normalize_cod
 grp_cols = ["cod_key", "periodo_fmt", "curso_conva_k", "resol_conva_k"]
 
 def _pick_best_conva_suffix(g: pd.DataFrame) -> str:
-    # 1) Preferir cod_carrera de fila con cod_curso tipo 24A01/25A01/etc.
     g1 = g[g["cod_curso_k"].map(_looks_like_regular_course_code) & g["cod_carrera_k"].ne("")]
     if len(g1) > 0:
         return str(g1.iloc[0]["cod_carrera_k"]).strip()
 
-    # 2) Fallback: primer cod_carrera no vacío
     g2 = g[g["cod_carrera_k"].ne("")]
     if len(g2) > 0:
         return str(g2.iloc[0]["cod_carrera_k"]).strip()
@@ -1551,22 +1509,25 @@ resol_conva_series = (
     if "resol_conva" in si_curlle_dep.columns
     else pd.Series([""] * len(si_curlle_dep), index=si_curlle_dep.index)
 )
-# ✅ CONCATENAR Curso Conva + "-" + SUFIJO CORRECTO (del grupo de convalidación, NO de la fila depurada)
 
+# ✅ CONCATENAR Curso Conva + "-" + SUFIJO CORRECTO (del grupo ORIGINAL, NO de la fila depurada)
 curso_conva_norm = curso_conva_series.fillna("").astype(str).map(normalize_cod_curso_spaces)
 resol_conva_norm = resol_conva_series.fillna("").astype(str).str.strip()
 
-# Detecta códigos tipo 14A08, 21A13, 25A01 (2-3 dígitos + letra + 2 dígitos)
 is_codcurso_conva = curso_conva_norm.str.match(r"^\d{2,3}[A-Z]\d{2}$", na=False)
 
+# ✅ FIX: buscar sufijo ignorando periodo (porque P03 depura y puede quedarse sin el periodo/fila)
 def _get_conva_suffix(row) -> str:
-    key = (
-        str(row.get("cod_key", "")).strip().upper(),
-        str(row.get("periodo_fmt", "")).strip(),
-        str(row.get("curso_conva", "")).strip().upper().replace(" ", ""),
-        str(row.get("resol_conva", "")).strip(),
-    )
-    return str(conva_suffix_map.get(key, "")).strip()
+    cod_key = str(row.get("cod_key", "")).strip().upper()
+    curso_conva_k = normalize_cod_curso_spaces(row.get("curso_conva", ""))
+    resol_k = str(row.get("resol_conva", "")).strip()
+
+    # escaneo del mapa (con periodos) pero ignorando el periodo
+    for (k_cod, _k_per, k_conva, k_resol), suf in conva_suffix_map.items():
+        if k_cod == cod_key and k_conva == curso_conva_k and k_resol == resol_k:
+            return str(suf).strip()
+
+    return ""
 
 conva_suffix_series = si_curlle_dep.apply(_get_conva_suffix, axis=1).fillna("").astype(str).str.strip()
 
@@ -1575,19 +1536,6 @@ mask_concat = is_codcurso_conva & conva_suffix_series.ne("")
 curso_conva_series = curso_conva_series.copy()
 curso_conva_series.loc[mask_concat] = (
     curso_conva_norm.loc[mask_concat] + "-" + conva_suffix_series.loc[mask_concat]
-)
-
-# Normaliza (quita espacios internos, upper) para evaluar patrón
-curso_conva_norm = curso_conva_series.fillna("").astype(str).map(normalize_cod_curso_spaces)
-
-# Detecta códigos tipo 14A08, 21A13, 25A01 (2-3 dígitos + letra + 2 dígitos)
-is_codcurso_conva = curso_conva_norm.str.match(r"^\d{2,3}[A-Z]\d{2}$", na=False)
-
-# Aplica concatenación solo donde corresponda
-curso_conva_series = curso_conva_series.copy()
-mask_concat = is_codcurso_conva & cod_carrera_series.fillna("").astype(str).str.strip().ne("")
-curso_conva_series.loc[mask_concat] = (
-    curso_conva_norm.loc[mask_concat] + "-" + cod_carrera_series.loc[mask_concat]
 )
 
 # =========================
@@ -1634,7 +1582,6 @@ plan_codigo_series = (
 
 tipo_matricula_series = si_curlle_dep["cod_curso"].map(tipo_matricula_from_codcurso)
 
-
 # ✅ Periodo P04:
 periodo_p04 = si_curlle_dep["periodo_fmt"].fillna("").astype(str).str.strip().copy()
 
@@ -1650,6 +1597,7 @@ if "periodo_ingreso_fmt" in si_curlle_dep.columns:
 
 tipo_matricula_series = tipo_matricula_series.copy()
 tipo_matricula_series.loc[cex_mask & ~tipo_matricula_series.eq("EXSUF")] = "CEX"
+
 codigo_curso_series = []
 for i in range(len(si_curlle_dep)):
     escuela = str(codigo_escuela_series.iloc[i]).strip()
@@ -1688,7 +1636,7 @@ p04_data = pd.DataFrame({
 
 p04_data = p04_data.loc[p04_ok_mask.values].copy()
 
-# ✅ EXTRA BLINDAJE ANTI-DUP: por si entra "10A06" repetido desde Curlle
+# ✅ EXTRA BLINDAJE ANTI-DUP
 p04_data = p04_data.drop_duplicates(
     subset=["Periodo", "CodigoAlumno", "CodigoCurso", "CodigoPlan", "TipoMatricula"],
     keep="first",
@@ -1712,7 +1660,6 @@ p05_data = pd.DataFrame({
 
 p05_data = p05_data.loc[p04_ok_mask.values].copy()
 
-# ✅ EXTRA BLINDAJE ANTI-DUP
 p05_data = p05_data.drop_duplicates(
     subset=["Periodo", "CodigoAlumno", "CodigoCurso", "CodigoPlan", "TipoMatricula", "Nota"],
     keep="first",
@@ -1765,13 +1712,12 @@ p01_sheet = align_df_to_template_df(P01_TEMPLATE, p01_data)
 p02_sheet = align_df_to_template_df(P02_TEMPLATE, p02_data)
 p03_sheet = align_df_to_template_df(P03_TEMPLATE, p03_data)
 
-# ✅ FORZAR OBS en el excel descargado (aunque tu plantilla no tenga esa columna)
+# ✅ FORZAR OBS en el excel descargado
 p03_sheet["OBS"] = p03_data["OBS"].fillna("").astype(str)
 
 p04_sheet = align_df_to_template_df(P04_TEMPLATE, p04_data)
 p05_sheet = align_df_to_template_df(P05_TEMPLATE, p05_data)
-# ✅ Forzar columnas extra aunque la plantilla P04/P05 no las tenga
-# (se agregan al final en el Excel descargado)
+
 for col in ["Curso Conva", "Resol. Conva"]:
     if col not in p04_sheet.columns and col in p04_data.columns:
         p04_sheet[col] = p04_data[col].fillna("").astype(str)
