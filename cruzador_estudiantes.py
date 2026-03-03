@@ -1526,8 +1526,13 @@ plan_codigo_series = (
 
 tipo_matricula_series = si_curlle_dep["cod_curso"].map(tipo_matricula_from_codcurso)
 
+
 # ✅ Periodo P04:
 periodo_p04 = si_curlle_dep["periodo_fmt"].fillna("").astype(str).str.strip().copy()
+
+# ✅ NUEVO: flag CEX solo si el periodo original era "#¿NOMBRE?"
+cex_mask = periodo_p04.eq("#¿NOMBRE?")
+
 exsuf_mask = si_curlle_dep["cod_curso"].fillna("").astype(str).map(normalize_cod_curso_spaces).str.startswith("EXSUF")
 bad_mask = periodo_p04.isin(["#¿NOMBRE?", "221"])
 fix_mask = exsuf_mask | bad_mask
@@ -1535,6 +1540,8 @@ fix_mask = exsuf_mask | bad_mask
 if "periodo_ingreso_fmt" in si_curlle_dep.columns:
     periodo_p04.loc[fix_mask] = si_curlle_dep.loc[fix_mask, "periodo_ingreso_fmt"].fillna("").astype(str).str.strip()
 
+tipo_matricula_series = tipo_matricula_series.copy()
+tipo_matricula_series.loc[cex_mask & ~tipo_matricula_series.eq("EXSUF")] = "CEX"
 codigo_curso_series = []
 for i in range(len(si_curlle_dep)):
     escuela = str(codigo_escuela_series.iloc[i]).strip()
