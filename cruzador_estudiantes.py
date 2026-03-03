@@ -443,6 +443,22 @@ PROGRAMA_TO_COD = {
     norm_text_keep_spaces("ADMINISTRACIÓN Y FINANZA"): "AF",
 }
 
+# ✅ PARA MOSTRAR “PROGRAMA ORIGEN” EN P03 (código -> nombre)
+COD_TO_PROGRAMA = {
+    "IN": "INGENIERÍA INDUSTRIAL",
+    "AE": "ADMINISTRACIÓN DE EMPRESAS",
+    "IC": "INGENIERÍA CIVIL",
+    "IS": "INGENIERÍA DE SISTEMAS",
+    "AR": "ARQUITECTURA",
+    "CO": "CONTABILIDAD",
+    "DE": "DERECHO",
+    "PS": "PSICOLOGÍA",
+    "EN": "ENFERMERÍA",
+    "MH": "MEDICINA HUMANA",
+    "OB": "OBSTETRICIA",
+    "AF": "ADMINISTRACIÓN Y FINANZA",
+}
+
 FAM_ING = {"AF", "DE", "IS", "CO", "IN", "AE", "IC", "AR"}
 FAM_SALUD = {"PS", "EN", "OB", "MH"}
 
@@ -1408,38 +1424,8 @@ p02_data = pd.DataFrame({
 })
 
 # =========================
-# P03: resolver nombre + origen (plan/carrera)
-# =========================
-si_curlle["carrera_key"] = si_curlle["carrera_key"].fillna("").astype(str).str.strip()
-si_curlle["plan_key"] = si_curlle["plan_key"].fillna("").astype(str).str.strip()
-si_curlle["cod_curso_key"] = si_curlle["cod_curso_key"].fillna("").astype(str).map(normalize_cod_curso_spaces)
-
-resolved_curso, resolved_carrera, resolved_plan = [], [], []
-for _, row in si_curlle.iterrows():
-    curso, car_res, plan_res = resolve_course_name_and_origin(
-        pl2=pl2,
-        carrera_key=row.get("carrera_key", ""),
-        plan_key=row.get("plan_key", ""),
-        cod_curso_key=row.get("cod_curso_key", ""),
-    )
-    resolved_curso.append(curso)
-    resolved_carrera.append(car_res)
-    resolved_plan.append(plan_res)
-
-si_curlle["curso_resuelto"] = resolved_curso
-si_curlle["carrera_resuelta"] = resolved_carrera
-si_curlle["plan_resuelto"] = resolved_plan
-
-si_curlle["cod_carrera_out"] = si_curlle["cod_carrera"].fillna("").astype(str).str.strip()
-si_curlle["plan_out"] = si_curlle["plan"].fillna("").astype(str).str.strip()
-
-mask_override = si_curlle["curso_resuelto"].fillna("").astype(str).str.strip() != ""
-si_curlle.loc[mask_override, "cod_carrera_out"] = si_curlle.loc[mask_override, "carrera_resuelta"].fillna("").astype(str).str.strip()
-si_curlle.loc[mask_override, "plan_out"] = si_curlle.loc[mask_override, "plan_resuelto"].fillna("").astype(str).str.strip()
-
-# =========================
 # ✅ MAPA: sufijo correcto para Curso Conva (ANTES de depurar)
-# Usa el cod_carrera del "curso origen" tipo 24A01 cuando exista
+# - Llave estable: (cod_key, curso_conva, resol_conva)
 # =========================
 def _looks_like_regular_course_code(x: str) -> bool:
     s = normalize_cod_curso_spaces(x)
@@ -1451,21 +1437,18 @@ _tmp["curso_conva_k"] = _tmp["curso_conva"].fillna("").astype(str).map(normalize
 _tmp["resol_conva_k"] = _tmp["resol_conva"].fillna("").astype(str).str.strip()
 _tmp["cod_curso_k"] = _tmp["cod_curso"].fillna("").astype(str).map(normalize_cod_curso_spaces)
 
-# ✅ AQUI ESTA EL CAMBIO: usar cod_carrera_out (origen resuelto), no cod_carrera crudo
-if "cod_carrera_out" in _tmp.columns:
-    _tmp["cod_carrera_k"] = _tmp["cod_carrera_out"].fillna("").astype(str).str.strip()
-else:
-    _tmp["cod_carrera_k"] = _tmp["cod_carrera"].fillna("").astype(str).str.strip()
+# ✅ OJO: acá todavía NO existe cod_carrera_out, así que usamos cod_carrera del curlle (origen)
+_tmp["cod_carrera_k"] = _tmp["cod_carrera"].fillna("").astype(str).str.strip()
 
-grp_cols = ["cod_key", "curso_conva_k", "resol_conva_k"]  # ✅ sin periodo (más estable)
+grp_cols = ["cod_key", "curso_conva_k", "resol_conva_k"]
 
 def _pick_best_conva_suffix(g: pd.DataFrame) -> str:
-    # 1) Preferir fila donde el curso "origen" es regular tipo 24A01 / 25A01
+    # 1) Preferir cod_carrera donde el curso origen es regular tipo 24A01/25A01
     g1 = g[g["cod_curso_k"].map(_looks_like_regular_course_code) & g["cod_carrera_k"].ne("")]
     if len(g1) > 0:
         return str(g1.iloc[0]["cod_carrera_k"]).strip()
 
-    # 2) Fallback: primer cod_carrera_k no vacío
+    # 2) Fallback: primer cod_carrera no vacío
     g2 = g[g["cod_carrera_k"].ne("")]
     if len(g2) > 0:
         return str(g2.iloc[0]["cod_carrera_k"]).strip()
@@ -1488,10 +1471,15 @@ si_curlle_dep = depurar_p03(
 
 p03_codigo_alumno_from_padron = si_curlle_dep[padron_cod_col].fillna("").astype(str).str.strip()
 
+# ✅ Programa ORIGEN (desde cod_carrera_out)
+cod_carrera_origen = si_curlle_dep["cod_carrera_out"].fillna("").astype(str).str.strip()
+programa_origen = cod_carrera_origen.map(lambda x: COD_TO_PROGRAMA.get(x, x)).fillna("")
+
 p03_data = pd.DataFrame({
     "Código Alumno": p03_codigo_alumno_from_padron,
     "Nombre Completo": si_curlle_dep["nombre_completo"],
     "Programa Academico": si_curlle_dep[padron_prog_col].fillna("").astype(str).str.strip() if padron_prog_col else "",
+    "Programa Origen": programa_origen,  # ✅ NUEVO
     "Periodo": si_curlle_dep["periodo_fmt"],
     "Cod. Curso": si_curlle_dep["cod_curso"].fillna("").astype(str).map(normalize_cod_curso_spaces),
     "Nom. Curso": si_curlle_dep["curso_resuelto"].fillna("").astype(str).str.strip(),
@@ -1517,33 +1505,23 @@ resol_conva_series = (
     else pd.Series([""] * len(si_curlle_dep), index=si_curlle_dep.index)
 )
 
-# ✅ CONCATENAR Curso Conva + "-" + SUFIJO CORRECTO (del grupo ORIGINAL, NO de la fila depurada)
 curso_conva_norm = curso_conva_series.fillna("").astype(str).map(normalize_cod_curso_spaces)
-resol_conva_norm = resol_conva_series.fillna("").astype(str).str.strip()
-
 is_codcurso_conva = curso_conva_norm.str.match(r"^\d{2,3}[A-Z]\d{2}$", na=False)
 
-# ✅ FIX: buscar sufijo ignorando periodo (porque P03 depura y puede quedarse sin el periodo/fila)
 def _get_conva_suffix(row) -> str:
-    cod_key = str(row.get("cod_key", "")).strip().upper()
-    curso_conva_k = normalize_cod_curso_spaces(row.get("curso_conva", ""))
-    resol_k = str(row.get("resol_conva", "")).strip()
-
-    # escaneo del mapa (con periodos) pero ignorando el periodo
-    for (k_cod, _k_per, k_conva, k_resol), suf in conva_suffix_map.items():
-        if k_cod == cod_key and k_conva == curso_conva_k and k_resol == resol_k:
-            return str(suf).strip()
-
-    return ""
+    key = (
+        str(row.get("cod_key", "")).strip().upper(),
+        normalize_cod_curso_spaces(row.get("curso_conva", "")),
+        str(row.get("resol_conva", "")).strip(),
+    )
+    return str(conva_suffix_map.get(key, "")).strip()
 
 conva_suffix_series = si_curlle_dep.apply(_get_conva_suffix, axis=1).fillna("").astype(str).str.strip()
 
+# ✅ FIX REAL: AHORA SÍ APLICA EL SUFIJO (antes lo calculabas y no lo usabas)
+curso_conva_final = curso_conva_series.copy()
 mask_concat = is_codcurso_conva & conva_suffix_series.ne("")
-
-curso_conva_series = curso_conva_series.copy()
-curso_conva_series.loc[mask_concat] = (
-    curso_conva_norm.loc[mask_concat] + "-" + conva_suffix_series.loc[mask_concat]
-)
+curso_conva_final.loc[mask_concat] = curso_conva_norm.loc[mask_concat] + "-" + conva_suffix_series.loc[mask_concat]
 
 # =========================
 # P04
@@ -1637,7 +1615,7 @@ p04_data = pd.DataFrame({
     "CodigoPlan": plan_codigo_series,
     "CodigoCurso": codigo_curso_series,
     "TipoMatricula": tipo_matricula_series,
-    "Curso Conva": curso_conva_series,
+    "Curso Conva": curso_conva_final,     # ✅ APLICADO
     "Resol. Conva": resol_conva_series,
 })
 
@@ -1661,7 +1639,7 @@ p05_data = pd.DataFrame({
     "CodigoPlan": plan_codigo_series,
     "Nota": nota_series,
     "TipoMatricula": tipo_matricula_series,
-    "Curso Conva": curso_conva_series,
+    "Curso Conva": curso_conva_final,     # ✅ APLICADO
     "Resol. Conva": resol_conva_series,
 })
 
@@ -1720,7 +1698,8 @@ p02_sheet = align_df_to_template_df(P02_TEMPLATE, p02_data)
 p03_sheet = align_df_to_template_df(P03_TEMPLATE, p03_data)
 
 # ✅ FORZAR OBS en el excel descargado
-p03_sheet["OBS"] = p03_data["OBS"].fillna("").astype(str)
+if "OBS" in p03_sheet.columns:
+    p03_sheet["OBS"] = p03_data["OBS"].fillna("").astype(str)
 
 p04_sheet = align_df_to_template_df(P04_TEMPLATE, p04_data)
 p05_sheet = align_df_to_template_df(P05_TEMPLATE, p05_data)
