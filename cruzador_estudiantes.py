@@ -1514,6 +1514,26 @@ resol_conva_series = (
     if "resol_conva" in si_curlle_dep.columns
     else pd.Series([""] * len(si_curlle_dep), index=si_curlle_dep.index)
 )
+# ✅ CONCATENAR Curso Conva + "-" + Cod. Carrera SOLO si Curso Conva parece código (ej: 25A01)
+# Nota: en tu df si_curlle_dep, la columna ya existe como 'cod_carrera' (por tu validación need_cols)
+cod_carrera_series = (
+    si_curlle_dep["cod_carrera"].fillna("").astype(str).str.strip()
+    if "cod_carrera" in si_curlle_dep.columns
+    else pd.Series([""] * len(si_curlle_dep), index=si_curlle_dep.index)
+)
+
+# Normaliza (quita espacios internos, upper) para evaluar patrón
+curso_conva_norm = curso_conva_series.fillna("").astype(str).map(normalize_cod_curso_spaces)
+
+# Detecta códigos tipo 14A08, 21A13, 25A01 (2-3 dígitos + letra + 2 dígitos)
+is_codcurso_conva = curso_conva_norm.str.match(r"^\d{2,3}[A-Z]\d{2}$", na=False)
+
+# Aplica concatenación solo donde corresponda
+curso_conva_series = curso_conva_series.copy()
+mask_concat = is_codcurso_conva & cod_carrera_series.fillna("").astype(str).str.strip().ne("")
+curso_conva_series.loc[mask_concat] = (
+    curso_conva_norm.loc[mask_concat] + "-" + cod_carrera_series.loc[mask_concat]
+)
 
 # =========================
 # P04
