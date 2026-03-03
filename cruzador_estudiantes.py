@@ -1334,7 +1334,10 @@ ak_by_dni = ak[ak["dni_key"].fillna("").astype(str).str.len() > 0].drop_duplicat
 ak_by_cod = ak[ak["cod_key"].fillna("").astype(str).str.len() > 0].drop_duplicates(subset=["cod_key"], keep="first")
 
 # Curlle columnas requeridas
-need_cols = ["codigo_alumno", "periodo", "cod_curso", "nota_curlle", "plan", "cod_carrera"]
+need_cols = [
+    "codigo_alumno", "periodo", "cod_curso", "nota_curlle", "plan", "cod_carrera",
+    "curso_conva", "resol_conva"
+]
 for nc in need_cols:
     if nc not in cur.columns:
         st.error(f"Curlle no trae la columna esperada: {nc}")
@@ -1498,6 +1501,21 @@ p03_data = pd.DataFrame({
 p03_data["OBS"] = ""
 
 # =========================
+# ✅ Convalidaciones desde Curlle (para P04 y P05)
+# =========================
+curso_conva_series = (
+    si_curlle_dep["curso_conva"].fillna("").astype(str).str.strip()
+    if "curso_conva" in si_curlle_dep.columns
+    else pd.Series([""] * len(si_curlle_dep), index=si_curlle_dep.index)
+)
+
+resol_conva_series = (
+    si_curlle_dep["resol_conva"].fillna("").astype(str).str.strip()
+    if "resol_conva" in si_curlle_dep.columns
+    else pd.Series([""] * len(si_curlle_dep), index=si_curlle_dep.index)
+)
+
+# =========================
 # P04
 # =========================
 programa_series = (
@@ -1589,6 +1607,8 @@ p04_data = pd.DataFrame({
     "CodigoPlan": plan_codigo_series,
     "CodigoCurso": codigo_curso_series,
     "TipoMatricula": tipo_matricula_series,
+    "Curso Conva": curso_conva_series,
+    "Resol. Conva": resol_conva_series,
 })
 
 p04_data = p04_data.loc[p04_ok_mask.values].copy()
@@ -1611,6 +1631,8 @@ p05_data = pd.DataFrame({
     "CodigoPlan": plan_codigo_series,
     "Nota": nota_series,
     "TipoMatricula": tipo_matricula_series,
+    "Curso Conva": curso_conva_series,
+    "Resol. Conva": resol_conva_series,
 })
 
 p05_data = p05_data.loc[p04_ok_mask.values].copy()
@@ -1673,6 +1695,13 @@ p03_sheet["OBS"] = p03_data["OBS"].fillna("").astype(str)
 
 p04_sheet = align_df_to_template_df(P04_TEMPLATE, p04_data)
 p05_sheet = align_df_to_template_df(P05_TEMPLATE, p05_data)
+# ✅ Forzar columnas extra aunque la plantilla P04/P05 no las tenga
+# (se agregan al final en el Excel descargado)
+for col in ["Curso Conva", "Resol. Conva"]:
+    if col not in p04_sheet.columns and col in p04_data.columns:
+        p04_sheet[col] = p04_data[col].fillna("").astype(str)
+    if col not in p05_sheet.columns and col in p05_data.columns:
+        p05_sheet[col] = p05_data[col].fillna("").astype(str)
 
 step(95, "Generando Excel final (P01–P05)...")
 multi_excel_bytes = build_multi_sheet_excel({
