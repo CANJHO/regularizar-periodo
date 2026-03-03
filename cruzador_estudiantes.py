@@ -1408,6 +1408,70 @@ m_cur = no_ak_basic.loc[no_ak_basic["has_curlle_student"]].merge(
 m_cur["cod_curso_clean"] = m_cur["cod_curso"].fillna("").astype(str).str.strip()
 si_curlle = m_cur.loc[m_cur["cod_curso_clean"].ne("")].copy()
 
+# =========================================================
+# ✅ ARREGLO: Construir columnas necesarias para depurar_p03
+# - curso_resuelto, plan_out, cod_carrera_out, nombre_completo
+# =========================================================
+
+# Nombre completo (si no existe)
+if "nombre_completo" not in si_curlle.columns:
+    if "nombre_completo_calc" in si_curlle.columns:
+        si_curlle["nombre_completo"] = si_curlle["nombre_completo_calc"].fillna("").astype(str).str.strip()
+    else:
+        si_curlle["nombre_completo"] = ""
+
+# Asegurar llaves base
+if "carrera_key" not in si_curlle.columns:
+    si_curlle["carrera_key"] = si_curlle.get("cod_carrera", "").fillna("").astype(str).str.strip()
+
+if "plan_key" not in si_curlle.columns:
+    si_curlle["plan_key"] = si_curlle.get("plan", "").fillna("").astype(str).str.strip()
+
+if "cod_curso_key" not in si_curlle.columns:
+    si_curlle["cod_curso_key"] = si_curlle.get("cod_curso", "").fillna("").astype(str).map(normalize_cod_curso_spaces)
+
+# Resolver nombre de curso + origen (desde pl2)
+if "curso_resuelto" not in si_curlle.columns or "plan_out" not in si_curlle.columns or "cod_carrera_out" not in si_curlle.columns:
+    def _resolve_row(r):
+        curso, carr_res, plan_res = resolve_course_name_and_origin(
+            pl2=pl2,
+            carrera_key=str(r.get("carrera_key", "")).strip(),
+            plan_key=str(r.get("plan_key", "")).strip(),
+            cod_curso_key=str(r.get("cod_curso_key", "")).strip(),
+        )
+        return pd.Series([curso, carr_res, plan_res])
+
+    _resolved = si_curlle.apply(_resolve_row, axis=1)
+    _resolved.columns = ["curso_resuelto", "cod_carrera_out", "plan_out"]
+
+    if "curso_resuelto" not in si_curlle.columns:
+        si_curlle["curso_resuelto"] = _resolved["curso_resuelto"]
+    else:
+        si_curlle["curso_resuelto"] = si_curlle["curso_resuelto"].fillna("").astype(str).str.strip()
+        si_curlle.loc[si_curlle["curso_resuelto"].eq(""), "curso_resuelto"] = _resolved["curso_resuelto"]
+
+    if "cod_carrera_out" not in si_curlle.columns:
+        si_curlle["cod_carrera_out"] = _resolved["cod_carrera_out"]
+    else:
+        si_curlle["cod_carrera_out"] = si_curlle["cod_carrera_out"].fillna("").astype(str).str.strip()
+        si_curlle.loc[si_curlle["cod_carrera_out"].eq(""), "cod_carrera_out"] = _resolved["cod_carrera_out"]
+
+    if "plan_out" not in si_curlle.columns:
+        si_curlle["plan_out"] = _resolved["plan_out"]
+    else:
+        si_curlle["plan_out"] = si_curlle["plan_out"].fillna("").astype(str).str.strip()
+        si_curlle.loc[si_curlle["plan_out"].eq(""), "plan_out"] = _resolved["plan_out"]
+
+# Blindaje final por si pl2 no encontró nada
+si_curlle["curso_resuelto"] = si_curlle["curso_resuelto"].fillna("").astype(str).str.strip()
+si_curlle["plan_out"] = si_curlle["plan_out"].fillna("").astype(str).str.strip()
+si_curlle["cod_carrera_out"] = si_curlle["cod_carrera_out"].fillna("").astype(str).str.strip()
+
+# fallback si quedaron vacíos
+si_curlle.loc[si_curlle["plan_out"].eq(""), "plan_out"] = si_curlle.get("plan", "").fillna("").astype(str).str.strip()
+si_curlle.loc[si_curlle["cod_carrera_out"].eq(""), "cod_carrera_out"] = si_curlle.get("cod_carrera", "").fillna("").astype(str).str.strip()
+si_curlle.loc[si_curlle["curso_resuelto"].eq(""), "curso_resuelto"] = si_curlle.get("cod_curso", "").fillna("").astype(str).map(normalize_cod_curso_spaces)
+
 st.info(
     "DEBUG CURLLE MATCH (ANTI-JOIN) -> "
     f"NoAkademic alumnos={len(no_ak_basic):,} | "
