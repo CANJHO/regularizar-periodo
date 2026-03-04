@@ -1490,6 +1490,7 @@ p02_data = pd.DataFrame({
 # =========================
 # ✅ MAPA: sufijo correcto para Curso Conva (ANTES de depurar)
 # - Llave estable: (cod_key, curso_conva, resol_conva)
+# ✅ NUEVO: el sufijo sale de PLANES (pl2) usando curso_conva (si es código tipo 14A08)
 # =========================
 def _looks_like_regular_course_code(x: str) -> bool:
     s = normalize_cod_curso_spaces(x)
@@ -1501,21 +1502,66 @@ _tmp["curso_conva_k"] = _tmp["curso_conva"].fillna("").astype(str).map(normalize
 _tmp["resol_conva_k"] = _tmp["resol_conva"].fillna("").astype(str).str.strip()
 _tmp["cod_curso_k"] = _tmp["cod_curso"].fillna("").astype(str).map(normalize_cod_curso_spaces)
 
-# ✅ OJO: acá todavía NO existe cod_carrera_out, así que usamos cod_carrera del curlle (origen)
-_tmp["cod_carrera_k"] = _tmp["cod_carrera"].fillna("").astype(str).str.strip()
+# Programa del alumno (desde padrón) -> código (EN/PS/...)
+if padron_prog_col and padron_prog_col in _tmp.columns:
+    _tmp["_prog_norm"] = _tmp[padron_prog_col].fillna("").astype(str).map(norm_text_keep_spaces)
+    _tmp["_cod_prog_alumno"] = _tmp["_prog_norm"].map(lambda x: PROGRAMA_TO_COD.get(x, "")).fillna("")
+else:
+    _tmp["_cod_prog_alumno"] = ""
 
 grp_cols = ["cod_key", "curso_conva_k", "resol_conva_k"]
 
-def _pick_best_conva_suffix(g: pd.DataFrame) -> str:
-    # 1) Preferir cod_carrera donde el curso origen es regular tipo 24A01/25A01
-    g1 = g[g["cod_curso_k"].map(_looks_like_regular_course_code) & g["cod_carrera_k"].ne("")]
-    if len(g1) > 0:
-        return str(g1.iloc[0]["cod_carrera_k"]).strip()
+def _suffix_from_planes_for_conva(conva_code: str, cod_prog_alumno: str) -> str:
+    """
+    Devuelve sufijo (carrera_key) para curso_conva usando pl2.
+    - Si el curso conva existe en una sola carrera => esa
+    - Si existe en varias => intenta por cod_prog_alumno y luego por familia
+    - Si sigue ambiguo => ""
+    """
+    cc = normalize_cod_curso_spaces(conva_code)
+    if not _looks_like_regular_course_code(cc):
+        return ""
 
-    # 2) Fallback: primer cod_carrera no vacío
-    g2 = g[g["cod_carrera_k"].ne("")]
+    hits = pl2[pl2["cod_curso_key"] == cc]
+    if len(hits) == 0:
+        return ""
+
+    carreras = [str(x).strip() for x in hits["carrera_key"].fillna("").astype(str).tolist() if str(x).strip() != ""]
+    carreras = list(dict.fromkeys(carreras))  # unique preserve order
+    if len(carreras) == 1:
+        return carreras[0]
+
+    cp = (cod_prog_alumno or "").strip()
+    if cp and cp in carreras:
+        return cp
+
+    fam = compatible_family(cp) if cp else set()
+    if fam:
+        fam_cands = [c for c in carreras if c in fam]
+        if len(fam_cands) == 1:
+            return fam_cands[0]
+
+    # ambiguo
+    return ""
+
+def _pick_best_conva_suffix(g: pd.DataFrame) -> str:
+    # 0) Preferir PLANES por curso_conva (si es código regular tipo 14A08)
+    conva_code = str(g["curso_conva_k"].iloc[0] if "curso_conva_k" in g.columns else "").strip()
+    cod_prog_alumno = str(g["_cod_prog_alumno"].iloc[0] if "_cod_prog_alumno" in g.columns else "").strip()
+
+    suf_pl = _suffix_from_planes_for_conva(conva_code, cod_prog_alumno)
+    if suf_pl:
+        return suf_pl
+
+    # 1) (fallback viejo) Preferir cod_carrera donde el curso ORIGEN es regular
+    g1 = g[g["cod_curso_k"].map(_looks_like_regular_course_code) & g.get("cod_carrera", "").fillna("").astype(str).str.strip().ne("")]
+    if len(g1) > 0:
+        return str(g1.iloc[0].get("cod_carrera", "")).strip()
+
+    # 2) (fallback viejo) primer cod_carrera no vacío
+    g2 = g[g.get("cod_carrera", "").fillna("").astype(str).str.strip().ne("")]
     if len(g2) > 0:
-        return str(g2.iloc[0]["cod_carrera_k"]).strip()
+        return str(g2.iloc[0].get("cod_carrera", "")).strip()
 
     return ""
 
@@ -1524,7 +1570,6 @@ conva_suffix_map = (
         .apply(_pick_best_conva_suffix)
         .to_dict()
 )
-
 step(85, "Depurando P03 y generando P04/P05...")
 si_curlle_dep = depurar_p03(
     si_df=si_curlle,
