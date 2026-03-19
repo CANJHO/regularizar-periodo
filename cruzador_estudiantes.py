@@ -342,24 +342,31 @@ def build_multi_sheet_excel(sheets: Dict[str, pd.DataFrame]) -> bytes:
                 df.to_excel(writer, index=False, sheet_name=sh)
 
                 # ✅ Pintar amarillo filas con OBS en P03 (solo en Excel descargado)
-                if sh == "P03" and ("OBS" in df.columns):
-                    ws = writer.sheets[sh]
+                if sh == "P03":
+                    obs_col = None
+                    for c in df.columns:
+                        if str(c).strip().upper() == "OBS":
+                            obs_col = c
+                            break
 
-                    yellow_fill = PatternFill(
-                        start_color="FFF59D",
-                        end_color="FFF59D",
-                        fill_type="solid",
-                    )
+                    if obs_col is not None:
+                        ws = writer.sheets[sh]
 
-                    # columna OBS (1-based en openpyxl)
-                    obs_col_idx = list(df.columns).index("OBS") + 1
+                        yellow_fill = PatternFill(
+                            start_color="FFF59D",
+                            end_color="FFF59D",
+                            fill_type="solid",
+                        )
 
-                    # recorrer filas de datos (row 1 es header, empieza en 2)
-                    for row_idx in range(2, len(df) + 2):
-                        obs_val = ws.cell(row=row_idx, column=obs_col_idx).value
-                        if obs_val is not None and str(obs_val).strip() != "":
-                            for col_idx in range(1, len(df.columns) + 1):
-                                ws.cell(row=row_idx, column=col_idx).fill = yellow_fill
+                        # columna OBS (1-based en openpyxl)
+                        obs_col_idx = list(df.columns).index(obs_col) + 1
+
+                        # recorrer filas de datos (row 1 es header, empieza en 2)
+                        for row_idx in range(2, len(df) + 2):
+                            obs_val = ws.cell(row=row_idx, column=obs_col_idx).value
+                            if obs_val is not None and str(obs_val).strip() != "":
+                                for col_idx in range(1, len(df.columns) + 1):
+                                    ws.cell(row=row_idx, column=col_idx).fill = yellow_fill
 
         return bio.getvalue()
 
@@ -1804,11 +1811,19 @@ if missing_tpl:
 
 p01_sheet = align_df_to_template_df(P01_TEMPLATE, p01_data)
 p02_sheet = align_df_to_template_df(P02_TEMPLATE, p02_data)
-p03_sheet = align_df_to_template_df(P03_TEMPLATE, p03_data)
+p03_sheet = align_df_to_template_df(P03_TEMPLATE, p03_data).reset_index(drop=True)
 
-# ✅ FORZAR OBS en el excel descargado
-if "OBS" in p03_sheet.columns:
-    p03_sheet["OBS"] = p03_data["OBS"].fillna("").astype(str)
+# ✅ FORZAR CREACIÓN DE OBS EN P03 AUNQUE LA PLANTILLA NO LA TRAIGA
+if "OBS" not in p03_sheet.columns:
+    p03_sheet["OBS"] = ""
+
+# ✅ COPIAR EL CONTENIDO REAL DE OBS DESDE p03_data
+p03_sheet["OBS"] = (
+    p03_data["OBS"]
+    .fillna("")
+    .astype(str)
+    .reset_index(drop=True)
+)
 
 p04_sheet = align_df_to_template_df(P04_TEMPLATE, p04_data)
 p05_sheet = align_df_to_template_df(P05_TEMPLATE, p05_data)
