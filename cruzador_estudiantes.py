@@ -486,12 +486,18 @@ COURSE_VARIANT_PATTERNS = [
 # ✅ Alias semánticos de cursos que deben considerarse equivalentes
 COURSE_ALIAS_GROUPS = [
     {
-        "trabajo de investigacion",
+        "TRABAJO DE INVESTIGACIÓN",
         "seminario de tesis ii",
         "seminario tesis ii",
         "seminario de tesis 2",
         "seminario tesis 2",
         "Seminario de Tesis II",
+    },
+        {
+        "REDACCIÓN Y COMUNICACIÓN",
+        "taller de comunicación oral",
+        "taller de comunicación escrita",
+        
     },
 ]
 
