@@ -34,23 +34,10 @@ P05_TEMPLATE = PLANTILLAS_DIR / "P05_carga_notas_akademic.xlsx"
 # Helpers base (BLINDADOS)
 # =========================
 def norm_col(c: str) -> str:
-    """
-    Normaliza encabezados para que:
-    - Respete '_' (underscore)
-    - Convierta '.', '-', '/', etc. en espacios
-    - Quite tildes y caracteres raros
-    - Devuelva snake_case consistente
-    """
     s = "" if c is None else str(c)
     s = s.strip().lower()
-
-    # separadores comunes a espacio
     s = re.sub(r"[.\-\/\\]+", " ", s)
-
-    # espacios múltiples
     s = re.sub(r"\s+", " ", s)
-
-    # quitar tildes
     s = (
         s.replace("á", "a")
         .replace("é", "e")
@@ -59,11 +46,7 @@ def norm_col(c: str) -> str:
         .replace("ú", "u")
         .replace("ñ", "n")
     )
-
-    # dejar solo letras, números, espacio y underscore
     s = re.sub(r"[^a-z0-9 _]+", "", s)
-
-    # snake_case
     s = s.replace(" ", "_")
     s = re.sub(r"_+", "_", s).strip("_")
     return s
@@ -103,17 +86,12 @@ def periodo_formato(val) -> str:
         return ""
     s = str(val).strip()
     s = re.sub(r"\.0$", "", s)
-    if re.fullmatch(r"\d{5}", s):  # 20201
+    if re.fullmatch(r"\d{5}", s):
         return f"{s[:4]}-{s[4:]}"
     return s
 
 
 def normalize_cod_curso_spaces(x) -> str:
-    """
-    ✅ normaliza códigos como '10 A06' -> '10A06'
-    - quita espacios internos (y cualquier whitespace)
-    - upper
-    """
     s = "" if x is None else str(x)
     s = s.strip().upper()
     s = re.sub(r"\s+", "", s)
@@ -121,12 +99,6 @@ def normalize_cod_curso_spaces(x) -> str:
 
 
 def pick_col(df: pd.DataFrame, candidates: List[str]) -> Optional[str]:
-    """
-    Busca una columna del df usando candidatos.
-    - normaliza candidates
-    - además intenta match "suave" quitando underscores
-      (ej: codigo_estudiante == codigoestudiante)
-    """
     cols = list(df.columns)
     cols_set = set(cols)
     soft_map = {c.replace("_", ""): c for c in cols}
@@ -138,7 +110,6 @@ def pick_col(df: pd.DataFrame, candidates: List[str]) -> Optional[str]:
         cn_soft = cn.replace("_", "")
         if cn_soft in soft_map:
             return soft_map[cn_soft]
-
     return None
 
 
@@ -153,7 +124,7 @@ def build_fullname_from_parts(padron: pd.DataFrame, ap_col: str, am_col: str, no
 
 
 # =========================
-# ✅ LECTURA EXCEL ESTABLE (ANTI-CRASH)
+# ✅ LECTURA EXCEL ESTABLE
 # =========================
 HEADER_HINTS = [
     "dni", "documento", "codigo_estudiante", "codigo_alumno", "codigo",
@@ -221,7 +192,6 @@ def _best_header_row_from_preview(preview_df: pd.DataFrame, max_rows: int = 60) 
 def read_excel_any(file_or_path, sheet_name=0) -> pd.DataFrame:
     bio = io.BytesIO(_to_bytes(file_or_path))
 
-    # preview (60 filas)
     try:
         bio.seek(0)
         preview = pd.read_excel(
@@ -237,7 +207,6 @@ def read_excel_any(file_or_path, sheet_name=0) -> pd.DataFrame:
 
     header_i = _best_header_row_from_preview(preview, max_rows=60)
 
-    # lectura final
     try:
         bio.seek(0)
         df = pd.read_excel(
@@ -256,7 +225,7 @@ def read_excel_any(file_or_path, sheet_name=0) -> pd.DataFrame:
 
 
 # =========================
-# Curlle CSV (robusto)
+# Curlle CSV
 # =========================
 def find_header_row_in_curlle(csv_bytes_or_path) -> int:
     if hasattr(csv_bytes_or_path, "read"):
@@ -341,7 +310,6 @@ def build_multi_sheet_excel(sheets: Dict[str, pd.DataFrame]) -> bytes:
             for sh, df in safe_sheets.items():
                 df.to_excel(writer, index=False, sheet_name=sh)
 
-                # ✅ Pintar amarillo filas con OBS en P03 (solo en Excel descargado)
                 if sh == "P03":
                     obs_col = None
                     for c in df.columns:
@@ -358,10 +326,8 @@ def build_multi_sheet_excel(sheets: Dict[str, pd.DataFrame]) -> bytes:
                             fill_type="solid",
                         )
 
-                        # columna OBS (1-based en openpyxl)
                         obs_col_idx = list(df.columns).index(obs_col) + 1
 
-                        # recorrer filas de datos (row 1 es header, empieza en 2)
                         for row_idx in range(2, len(df) + 2):
                             obs_val = ws.cell(row=row_idx, column=obs_col_idx).value
                             if obs_val is not None and str(obs_val).strip() != "":
@@ -433,7 +399,7 @@ def coalesce_series(a: pd.Series, b: pd.Series) -> pd.Series:
 
 
 # =========================
-# ✅ Depuración FINAL P03 (CORREGIDA + REGLA REEMPLAZO)
+# Diccionarios
 # =========================
 PROGRAMA_TO_COD = {
     norm_text_keep_spaces("INGENIERÍA INDUSTRIAL"): "IN",
@@ -450,7 +416,6 @@ PROGRAMA_TO_COD = {
     norm_text_keep_spaces("ADMINISTRACIÓN Y FINANZA"): "AF",
 }
 
-# ✅ PARA MOSTRAR “PROGRAMA ORIGEN” EN P03 (código -> nombre)
 COD_TO_PROGRAMA = {
     "IN": "INGENIERÍA INDUSTRIAL",
     "AE": "ADMINISTRACIÓN DE EMPRESAS",
@@ -473,33 +438,37 @@ COURSE_STOPWORDS = {
     "de", "del", "la", "las", "el", "los", "y", "e", "en", "para", "por", "a", "al",
     "un", "una", "unos", "unas", "i",
 }
+ROMAN_KEEP = {"ii", "iii", "iv", "v", "vi", "vii", "viii", "ix", "x"}
+ROMAN_LEVELS = {"i", "ii", "iii", "iv", "v", "vi", "vii", "viii", "ix", "x"}
 
-ROMAN_KEEP = {"ii", "iii", "iv", "v", "vi", "vii", "viii", "ix", "x"}  # se conservan
-
-# ✅ Variantes que NO deben romper el match real del curso
 COURSE_VARIANT_PATTERNS = [
     r"\bexamen de suficiencia\b",
     r"\belectiv[oa]\b(?:\s*[0-9]+)?",
     r"\belectiv[oa]\b(?:\s*[ivx]+)?",
 ]
 
-# ✅ Alias semánticos de cursos que deben considerarse equivalentes
-COURSE_ALIAS_GROUPS = [
-    {
-        "TRABAJO DE INVESTIGACIÓN",
-        "seminario de tesis ii",
-        "seminario tesis ii",
-        "seminario de tesis 2",
-        "seminario tesis 2",
-        "Seminario de Tesis II",
-    },
+# Solo para MATCH de P04/P05
+COURSE_ALIAS_GROUPS_LOOKUP = [
+    (
+        "trabajo de investigacion",
         {
-        "REDACCIÓN Y COMUNICACIÓN",
-        "taller de comunicación oral",
-        "taller de comunicación escrita",
-        
-    },
+            "trabajo de investigacion",
+            "seminario de tesis ii",
+            "seminario tesis ii",
+            "seminario de tesis 2",
+            "seminario tesis 2",
+        },
+    ),
+    (
+        "redaccion y comunicacion",
+        {
+            "redaccion y comunicacion",
+            "taller de comunicacion oral",
+            "taller de comunicacion escrita",
+        },
+    ),
 ]
+
 
 def strip_course_variants(text: str) -> str:
     s = norm_text_keep_spaces(text)
@@ -513,16 +482,21 @@ def strip_course_variants(text: str) -> str:
     s = re.sub(r"\s+", " ", s).strip()
     return s
 
-def apply_course_alias(text: str) -> str:
+
+def apply_course_alias_lookup(text: str) -> str:
     s = strip_course_variants(text)
     if s == "":
         return ""
 
-    for group in COURSE_ALIAS_GROUPS:
-        if s in group:
-            return sorted(group)[0]
-
+    for canonical, variants in COURSE_ALIAS_GROUPS_LOOKUP:
+        if s in variants:
+            return canonical
     return s
+
+
+def apply_course_alias_historical(text: str) -> str:
+    # En P03 dejamos el histórico real; solo quitamos variantes tipo electivo/exsuf
+    return strip_course_variants(text)
 
 
 def parse_nota_to_float(x) -> float:
@@ -534,18 +508,6 @@ def parse_nota_to_float(x) -> float:
         return float(s)
     except Exception:
         return np.nan
-
-
-def course_base_name(cod_curso: str, nom_curso: str) -> str:
-    cod = "" if cod_curso is None else str(cod_curso).strip().upper()
-    nom = "" if nom_curso is None else str(nom_curso).strip()
-
-    nom_n = apply_course_alias(nom)
-    nom_n = re.sub(r"\s*-\s*$", "", nom_n).strip()
-    nom_n = re.sub(r"\s*-\s+", " ", nom_n).strip()
-    nom_n = re.sub(r"\s+", " ", nom_n).strip()
-
-    return nom_n if nom_n != "" else cod
 
 
 def compatible_family(student_cod: str) -> set:
@@ -567,20 +529,21 @@ def _soft_singularize_token(w: str) -> str:
     return w
 
 
-def course_match_key(text: str) -> str:
-    """
-    Key fuerte para dedupe:
-    - normaliza (tildes, etc.)
-    - quita variantes tipo electivo / examen de suficiencia
-    - aplica alias semánticos (ej: Trabajo de Investigación == Seminario de Tesis II)
-    - quita SOLO sufijo I/1 al final (NO toca II, III...)
-    - elimina stopwords
-    - singulariza suave
-    - ordena tokens
-    """
-    t = apply_course_alias(text)
+def course_base_name_historical(cod_curso: str, nom_curso: str) -> str:
+    cod = "" if cod_curso is None else str(cod_curso).strip().upper()
+    nom = "" if nom_curso is None else str(nom_curso).strip()
 
-    # quitar SOLO ' i' o ' 1' al final
+    nom_n = apply_course_alias_historical(nom)
+    nom_n = re.sub(r"\s*-\s*$", "", nom_n).strip()
+    nom_n = re.sub(r"\s*-\s+", " ", nom_n).strip()
+    nom_n = re.sub(r"\s+", " ", nom_n).strip()
+
+    return nom_n if nom_n != "" else cod
+
+
+def course_match_key_historical(text: str) -> str:
+    t = apply_course_alias_historical(text)
+
     t = re.sub(r"\s+(i|1)\s*$", "", t).strip()
 
     if t == "":
@@ -613,36 +576,161 @@ def course_match_key(text: str) -> str:
     return " ".join(cleaned).strip()
 
 
-REEMPLAZO_DESDE_PERIODO = "2018-1"
+def _course_name_key(name: str) -> str:
+    n0 = "" if name is None else str(name)
+    n = apply_course_alias_lookup(n0)
+
+    if n == "":
+        return ""
+
+    n = re.sub(r"\s+", " ", n).strip()
+    n = re.sub(r"\s*-\s*$", "", n).strip()
+
+    stop = set(COURSE_STOPWORDS) | {"examen", "suficiencia", "electivo", "electiva"}
+    toks = [t for t in n.split() if t and t not in stop]
+
+    toks = [_soft_singularize_token(t) for t in toks]
+    toks = [t for t in toks if t]
+
+    toks.sort()
+    return " ".join(toks).strip()
 
 
-def _is_periodo_like(p: str) -> bool:
-    return bool(re.fullmatch(r"\d{4}\-\d{1,2}", (p or "").strip()))
+def _extract_roman_level(name: str) -> str:
+    t = norm_text_keep_spaces(name)
+    if not t:
+        return ""
+    toks = t.split()
+    if not toks:
+        return ""
+    last = toks[-1]
+    if last in ROMAN_LEVELS:
+        return last
+    for w in reversed(toks):
+        if w in ROMAN_LEVELS:
+            return w
+    return ""
 
 
-def _periodo_to_tuple(p: str):
-    if not _is_periodo_like(p):
-        return None
-    y, t = p.split("-")
-    try:
-        return (int(y), int(t))
-    except Exception:
-        return None
+def _roman_level_compatible(target_name: str, cand_name: str) -> bool:
+    lt = _extract_roman_level(target_name)
+    lc = _extract_roman_level(cand_name)
+    if lt:
+        return lc == lt
+    return lc == ""
 
 
-def _period_ge(p: str, ref: str) -> bool:
-    a = _periodo_to_tuple(p)
-    b = _periodo_to_tuple(ref)
-    if a is None or b is None:
+def _name_like_ok(target_name: str, cand_name: str, min_ratio: float = 0.78) -> bool:
+    t_raw = "" if target_name is None else str(target_name).strip()
+    c_raw = "" if cand_name is None else str(cand_name).strip()
+
+    if t_raw == "" or c_raw == "":
         return False
-    return a >= b
+
+    tk = _course_name_key(t_raw)
+    ck = _course_name_key(c_raw)
+
+    if tk != "" and tk == ck:
+        return True
+
+    if not _roman_level_compatible(t_raw, c_raw):
+        return False
+
+    t = apply_course_alias_lookup(t_raw)
+    c = apply_course_alias_lookup(c_raw)
+
+    if t == "" or c == "":
+        return False
+
+    ratio = difflib.SequenceMatcher(None, t, c).ratio()
+    return ratio >= min_ratio
 
 
-KEY_REDA_COMU = course_match_key("Redacción y Comunicación")
-KEY_TALLER_ORAL = course_match_key("Taller de Comunicación Oral")
-KEY_TALLER_ESCRITA = course_match_key("Taller de Comunicación Escrita")
+def _best_fuzzy_match_code(same_plan_df: pd.DataFrame, nombre_curso: str, min_ratio: float = 0.86) -> str:
+    target_raw = "" if nombre_curso is None else str(nombre_curso)
+    target = apply_course_alias_lookup(target_raw)
+    if target == "":
+        return ""
+
+    best_ratio = 0.0
+    best_code = ""
+
+    for _, r in same_plan_df.iterrows():
+        cand_raw = "" if r.get("curso_raw", "") is None else str(r.get("curso_raw", ""))
+        cand = apply_course_alias_lookup(cand_raw)
+        if cand == "":
+            continue
+
+        if not _roman_level_compatible(target_raw, cand_raw):
+            if _course_name_key(target_raw) != _course_name_key(cand_raw):
+                continue
+
+        ratio = difflib.SequenceMatcher(None, target, cand).ratio()
+        if ratio > best_ratio:
+            best_ratio = ratio
+            best_code = str(r.get("codigo_raw", "")).strip()
+
+    if best_ratio >= min_ratio:
+        return best_code
+    return ""
 
 
+def lookup_codigo_curso_tpa(tpa_map: pd.DataFrame, escuela: str, plan: str, codcurso: str, nombre_curso: str) -> str:
+    e = "" if escuela is None else str(escuela).strip()
+    p = "" if plan is None else str(plan).strip()
+
+    c_raw = normalize_cod_curso_spaces(codcurso)
+    c = _clean_codcurso(c_raw)
+
+    if e == "" or p == "":
+        return ""
+
+    same_plan = tpa_map[(tpa_map["escuela_key"] == e) & (tpa_map["plan_key"] == p)]
+    if len(same_plan) == 0:
+        return ""
+
+    is_exsuf = c_raw.startswith("EXSUF")
+
+    if (not is_exsuf) and c != "":
+        exact = same_plan[same_plan["codcurso_key"] == c]
+        if len(exact) > 0:
+            cand_name = str(exact.iloc[0].get("curso_raw", "")).strip()
+            if _name_like_ok(nombre_curso, cand_name, min_ratio=0.78):
+                return str(exact.iloc[0]["codigo_raw"]).strip()
+
+    nk = _course_name_key(nombre_curso)
+    if nk != "":
+        same_plan2 = same_plan[same_plan["curso_name_key"] == nk]
+        if len(same_plan2) > 0:
+            return str(same_plan2.iloc[0]["codigo_raw"]).strip()
+
+    fb = _best_fuzzy_match_code(same_plan, nombre_curso=nombre_curso, min_ratio=0.86)
+    if fb:
+        cand = same_plan[same_plan["codigo_raw"].astype(str).str.strip() == fb]
+        if len(cand) > 0:
+            cand_name = str(cand.iloc[0].get("curso_raw", "")).strip()
+            if _name_like_ok(nombre_curso, cand_name, min_ratio=0.78):
+                return fb
+        else:
+            return fb
+
+    return ""
+
+
+def _reda_source_priority(nombre_curso: str) -> int:
+    k = _course_name_key(nombre_curso)
+    if k == _course_name_key("Taller de Comunicación Escrita"):
+        return 3
+    if k == _course_name_key("Taller de Comunicación Oral"):
+        return 2
+    if k == _course_name_key("Redacción y Comunicación"):
+        return 1
+    return 0
+
+
+# =========================
+# Depuración P03
+# =========================
 def depurar_p03(
     si_df: pd.DataFrame,
     padron_prog_col: Optional[str],
@@ -652,7 +740,6 @@ def depurar_p03(
     df = si_df.copy()
     df["alumno_key"] = df[padron_cod_col].fillna("").astype(str).str.strip()
 
-    # Programa / Plan del alumno (padron)
     if padron_prog_col and padron_prog_col in df.columns:
         prog_norm = df[padron_prog_col].fillna("").astype(str).map(norm_text_keep_spaces)
         df["cod_programa_alumno"] = prog_norm.map(lambda x: PROGRAMA_TO_COD.get(x, "")).fillna("")
@@ -664,20 +751,17 @@ def depurar_p03(
     else:
         df["plan_sigu_alumno"] = ""
 
-    # Normalizaciones base
     df["nota_num"] = df["nota_curlle"].map(parse_nota_to_float)
     df["cod_curso_u"] = df["cod_curso"].fillna("").astype(str).map(normalize_cod_curso_spaces)
     df["nom_curso_u"] = df["curso_resuelto"].fillna("").astype(str).str.strip()
 
-    df["curso_base"] = df.apply(lambda r: course_base_name(r["cod_curso_u"], r["nom_curso_u"]), axis=1)
-    df["curso_match_key"] = df["curso_base"].map(course_match_key)
+    # ✅ En P03 mantenemos el histórico real
+    df["curso_base"] = df.apply(lambda r: course_base_name_historical(r["cod_curso_u"], r["nom_curso_u"]), axis=1)
+    df["curso_match_key"] = df["curso_base"].map(course_match_key_historical)
     df["periodo_u"] = df["periodo_fmt"].fillna("").astype(str).str.strip()
 
-    # fallback si quedó vacío
     df.loc[df["curso_match_key"].eq(""), "curso_match_key"] = df["cod_curso_u"].fillna("").astype(str).str.strip()
 
-    # ✅ HISTÓRICO:
-    # Si en alumno+periodo+curso hay alguna nota >0 => eliminar notas 0 del MISMO PERIODO
     df["_nota_safe"] = df["nota_num"].where(~df["nota_num"].isna(), -1)
 
     has_real_positive = (
@@ -696,37 +780,9 @@ def depurar_p03(
 
     df = df.loc[~pd.Series(drop_zero, index=df.index)].copy()
 
-    # -------------------------------------------------------
-    # ✅ REEMPLAZO: Redacción y Comunicación reemplaza Taller Oral/Escrita
-    # -------------------------------------------------------
-    in_scope = df["periodo_u"].map(lambda p: _period_ge(p, REEMPLAZO_DESDE_PERIODO))
+    # ✅ NO aplicar aquí equivalencia Redacción/Talleres.
+    # Esa equivalencia se resolverá solo en P04/P05 según el plan destino.
 
-    has_reda = (
-        df.loc[in_scope, ["alumno_key", "curso_match_key"]]
-          .assign(is_reda=lambda x: x["curso_match_key"].eq(KEY_REDA_COMU))
-          .groupby("alumno_key")["is_reda"]
-          .any()
-          .to_dict()
-    )
-
-    drop_rep = []
-    for idx, row in df.iterrows():
-        alumno = row["alumno_key"]
-        ck = row["curso_match_key"]
-        per = row["periodo_u"]
-
-        if not _period_ge(per, REEMPLAZO_DESDE_PERIODO):
-            drop_rep.append(False)
-            continue
-
-        if bool(has_reda.get(alumno, False)) and ck in {KEY_TALLER_ORAL, KEY_TALLER_ESCRITA}:
-            drop_rep.append(True)
-        else:
-            drop_rep.append(False)
-
-    df = df.loc[~pd.Series(drop_rep, index=df.index)].copy()
-
-    # Scoring: preferir plan/carrera que calcen con padron
     plan_out = df["plan_out"].fillna("").astype(str).str.strip()
     carrera_out = df["cod_carrera_out"].fillna("").astype(str).str.strip()
     plan_sigu = df["plan_sigu_alumno"].fillna("").astype(str).str.strip()
@@ -750,7 +806,6 @@ def depurar_p03(
     df["_score"] = score
     df["_idx0"] = np.arange(len(df))
 
-    # ✅ DEDUPE FINAL
     group_cols = ["alumno_key", "periodo_u", "curso_match_key"]
 
     df = (
@@ -767,7 +822,7 @@ def depurar_p03(
 
 
 # =========================
-# ✅ P04 (Matricula) - regla por matriz ACTIVO/INACTIVO
+# P04 reglas
 # =========================
 PROG_TO_ESCUELA = {
     norm_text_keep_spaces("INGENIERÍA INDUSTRIAL"): "P06",
@@ -881,41 +936,10 @@ def is_egresado_flag(val, codigo_alumno=None) -> bool:
     return only_digits(s) != "" and only_digits(s) == only_digits(cod)
 
 
-# =========================
-# ✅ CodigoCurso (P04) desde TODOS_PLANES_AKADEMIC
-# =========================
 def _clean_codcurso(x: str) -> str:
     s = "" if x is None else str(x).strip().upper()
     s = re.sub(r"\s+", "", s)
     return s
-
-
-def _course_name_key(name: str) -> str:
-    """
-    Normaliza nombre de curso para matchear contra TODOS_PLANES_AKADEMIC:
-    - quita 'examen de suficiencia'
-    - elimina stopwords comunes
-    - singulariza suave
-    - ordena tokens
-    """
-    n0 = "" if name is None else str(name)
-    n = norm_text_keep_spaces(n0)
-
-    if n == "":
-        return ""
-
-    n = n.replace("examen de suficiencia", " ").strip()
-    n = re.sub(r"\s+", " ", n).strip()
-    n = re.sub(r"\s*-\s*$", "", n).strip()
-
-    stop = set(COURSE_STOPWORDS) | {"examen", "suficiencia"}
-    toks = [t for t in n.split() if t and t not in stop]
-
-    toks = [_soft_singularize_token(t) for t in toks]
-    toks = [t for t in toks if t]
-
-    toks.sort()
-    return " ".join(toks).strip()
 
 
 def build_todos_planes_akademic_map(df_tpa: pd.DataFrame) -> pd.DataFrame:
@@ -924,7 +948,7 @@ def build_todos_planes_akademic_map(df_tpa: pd.DataFrame) -> pd.DataFrame:
 
     curso_col = "curso" if "curso" in df_tpa.columns else None
     if not curso_col:
-        raise RuntimeError("TODOS_PLANES_AKADEMIC no trae la columna 'CURSO' (necesaria para el match por nombre).")
+        raise RuntimeError("TODOS_PLANES_AKADEMIC no trae la columna 'CURSO'.")
 
     t = df_tpa.copy()
     t["codigo_raw"] = t["codigo"].fillna("").astype(str).str.strip()
@@ -947,143 +971,8 @@ def build_todos_planes_akademic_map(df_tpa: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-# =========================================================
-# ✅ BLINDAJE: evitar fuzzy-match incorrecto con niveles (II/III/IV)
-# =========================================================
-ROMAN_LEVELS = {"i", "ii", "iii", "iv", "v", "vi", "vii", "viii", "ix", "x"}
-
-
-def _extract_roman_level(name: str) -> str:
-    t = norm_text_keep_spaces(name)
-    if not t:
-        return ""
-    toks = t.split()
-    if not toks:
-        return ""
-    last = toks[-1]
-    if last in ROMAN_LEVELS:
-        return last
-    for w in reversed(toks):
-        if w in ROMAN_LEVELS:
-            return w
-    return ""
-
-
-def _roman_level_compatible(target_name: str, cand_name: str) -> bool:
-    lt = _extract_roman_level(target_name)
-    lc = _extract_roman_level(cand_name)
-    if lt:
-        return lc == lt
-    return lc == ""
-
-
-def _name_like_ok(target_name: str, cand_name: str, min_ratio: float = 0.78) -> bool:
-    t_raw = "" if target_name is None else str(target_name).strip()
-    c_raw = "" if cand_name is None else str(cand_name).strip()
-
-    if t_raw == "" or c_raw == "":
-        return False
-
-    tk = _course_name_key(t_raw)
-    ck = _course_name_key(c_raw)
-
-    # ✅ si la key semántica coincide, ya es válido aunque uno diga ELECTIVO
-    # ✅ o aunque sea Trabajo de Investigación vs Seminario de Tesis II
-    if tk != "" and tk == ck:
-        return True
-
-    # Si ambos nombres traen nivel romano explícito y difieren, bloquear
-    if not _roman_level_compatible(t_raw, c_raw):
-        return False
-
-    t = apply_course_alias(t_raw)
-    c = apply_course_alias(c_raw)
-
-    if t == "" or c == "":
-        return False
-
-    ratio = difflib.SequenceMatcher(None, t, c).ratio()
-    return ratio >= min_ratio
-
-
-def _best_fuzzy_match_code(same_plan_df: pd.DataFrame, nombre_curso: str, min_ratio: float = 0.86) -> str:
-    target_raw = "" if nombre_curso is None else str(nombre_curso)
-    target = apply_course_alias(target_raw)
-    if target == "":
-        return ""
-
-    best_ratio = 0.0
-    best_code = ""
-
-    for _, r in same_plan_df.iterrows():
-        cand_raw = "" if r.get("curso_raw", "") is None else str(r.get("curso_raw", ""))
-        cand = apply_course_alias(cand_raw)
-        if cand == "":
-            continue
-
-        # si ambos tienen romano explícito y choca, se bloquea
-        if not _roman_level_compatible(target_raw, cand_raw):
-            # excepto si ya son equivalentes por alias semántico
-            if _course_name_key(target_raw) != _course_name_key(cand_raw):
-                continue
-
-        ratio = difflib.SequenceMatcher(None, target, cand).ratio()
-        if ratio > best_ratio:
-            best_ratio = ratio
-            best_code = str(r.get("codigo_raw", "")).strip()
-
-    if best_ratio >= min_ratio:
-        return best_code
-    return ""
-
-
-def lookup_codigo_curso_tpa(tpa_map: pd.DataFrame, escuela: str, plan: str, codcurso: str, nombre_curso: str) -> str:
-    e = "" if escuela is None else str(escuela).strip()
-    p = "" if plan is None else str(plan).strip()
-
-    c_raw = normalize_cod_curso_spaces(codcurso)
-    c = _clean_codcurso(c_raw)
-
-    if e == "" or p == "":
-        return ""
-
-    same_plan = tpa_map[(tpa_map["escuela_key"] == e) & (tpa_map["plan_key"] == p)]
-    if len(same_plan) == 0:
-        return ""
-
-    is_exsuf = c_raw.startswith("EXSUF")
-
-    # 1) exact por código (NO EXSUF) + validar nombre
-    if (not is_exsuf) and c != "":
-        exact = same_plan[same_plan["codcurso_key"] == c]
-        if len(exact) > 0:
-            cand_name = str(exact.iloc[0].get("curso_raw", "")).strip()
-            if _name_like_ok(nombre_curso, cand_name, min_ratio=0.78):
-                return str(exact.iloc[0]["codigo_raw"]).strip()
-
-    # 2) exact por nombre key semántica
-    nk = _course_name_key(nombre_curso)
-    if nk != "":
-        same_plan2 = same_plan[same_plan["curso_name_key"] == nk]
-        if len(same_plan2) > 0:
-            return str(same_plan2.iloc[0]["codigo_raw"]).strip()
-
-    # 3) fuzzy por parecido dentro del mismo plan
-    fb = _best_fuzzy_match_code(same_plan, nombre_curso=nombre_curso, min_ratio=0.86)
-    if fb:
-        cand = same_plan[same_plan["codigo_raw"].astype(str).str.strip() == fb]
-        if len(cand) > 0:
-            cand_name = str(cand.iloc[0].get("curso_raw", "")).strip()
-            if _name_like_ok(nombre_curso, cand_name, min_ratio=0.78):
-                return fb
-        else:
-            return fb
-
-    return ""
-
-
 # =========================
-# ✅ Cache robusto (por HASH)
+# Cache
 # =========================
 def _hash_bytes(b: bytes) -> str:
     return hashlib.md5(b).hexdigest()
@@ -1169,15 +1058,13 @@ if not padron_file:
 if not run_btn:
     st.stop()
 
-# =========================
-# ✅ BARRA DE PROGRESO (ANTI-CUELGUE)
-# =========================
 progress = st.progress(0, text="Iniciando...")
 status = st.empty()
 
 def step(p: int, msg: str):
     progress.progress(p, text=msg)
     status.info(msg)
+
 
 step(5, "Validando archivos base...")
 
@@ -1194,9 +1081,6 @@ if not todos_planes_ak_file and not DEFAULT_TODOS_PLANES_AKADEMIC.exists():
     st.error(f"No encuentro {DEFAULT_TODOS_PLANES_AKADEMIC.name} en la raíz. Marca override y súbelo.")
     st.stop()
 
-# =========================
-# ✅ Guard por tamaño (evita tumbar Streamlit)
-# =========================
 MAX_MB = 35
 if padron_file and padron_file.name.lower().endswith((".xlsx", ".xls")):
     size_mb = len(padron_file.getvalue()) / (1024 * 1024)
@@ -1204,9 +1088,6 @@ if padron_file and padron_file.name.lower().endswith((".xlsx", ".xls")):
         st.error(f"Tu padrón pesa {size_mb:.1f} MB. Recomendado < {MAX_MB} MB o súbelo como CSV.")
         st.stop()
 
-# =========================
-# Load Padrón (estable)
-# =========================
 step(15, "Leyendo PADRÓN...")
 with st.spinner("Leyendo PADRÓN..."):
     if padron_file.name.lower().endswith(".csv"):
@@ -1219,9 +1100,6 @@ with st.spinner("Leyendo PADRÓN..."):
 with st.expander("🧪 Debug padrón: columnas detectadas"):
     st.write(padron.columns.tolist()[:120])
 
-# =========================
-# Detección columnas PADRÓN
-# =========================
 dni_candidates = [
     "dni", "documento", "doc", "document", "nro_documento", "n_documento",
     "numero_documento", "num_documento", "nro_doc", "numero_doc", "num_doc",
@@ -1270,7 +1148,6 @@ if not padron_cod_col:
     st.warning("No pude detectar CODIGO_ESTUDIANTE automáticamente. Selecciónalo manualmente.")
     padron_cod_col = st.selectbox("Selecciona la columna CODIGO_ESTUDIANTE", options=padron.columns.tolist())
 
-# Nombre completo
 if ap_pat_col and ap_mat_col and nombres_col:
     padron["nombre_completo_calc"] = build_fullname_from_parts(padron, ap_pat_col, ap_mat_col, nombres_col)
 else:
@@ -1284,14 +1161,12 @@ else:
     else:
         padron["nombre_completo_calc"] = pd.Series([""] * len(padron), index=padron.index)
 
-# PLAN-SIGU
 padron_plan_sigu_col = pick_col(
     padron,
     ["plansigu", "plan_sigu", "plan_sigui", "plan_siguiente", "plan_sgte",
      "plan_sig", "plan", "plan_de_estudios", "plan_estudios"]
 )
 
-# EGRESADO
 if padron_egresados_col:
     padron["egresado_flag"] = padron.apply(
         lambda r: is_egresado_flag(r.get(padron_egresados_col), r.get(padron_cod_col)),
@@ -1300,15 +1175,11 @@ if padron_egresados_col:
 else:
     padron["egresado_flag"] = False
 
-# PERIODO INGRESO
 if padron_periodo_ingreso_col:
     padron["periodo_ingreso_fmt"] = padron[padron_periodo_ingreso_col].map(periodo_formato)
 else:
     padron["periodo_ingreso_fmt"] = ""
 
-# =========================
-# Load bases (estable)
-# =========================
 step(45, "Leyendo bases (Akademic / Planes / Todos Planes / Curlle)...")
 with st.spinner("Leyendo bases (Akademic / Planes / Todos Planes / Curlle)..."):
 
@@ -1343,13 +1214,9 @@ except Exception as e:
     st.error(str(e))
     st.stop()
 
-# =========================
-# Normalize keys
-# =========================
 padron["dni_key"] = padron[padron_dni_col].map(zfill8)
 padron["cod_key"] = padron[padron_cod_col].fillna("").astype(str).str.strip().str.upper()
 
-# Akademic: DNI y COD
 dni_cols_ak = [c for c in ["user_dni", "userdni", "dni", "document", "documento", "numero_documento", "nro_documento"] if c in ak.columns]
 ak["dni_key"] = ""
 for c in dni_cols_ak:
@@ -1371,7 +1238,6 @@ ak_plan_col = pick_col(ak, ["plan_de_estudios", "plan_de_estudio", "plan", "plan
 ak_by_dni = ak[ak["dni_key"].fillna("").astype(str).str.len() > 0].drop_duplicates(subset=["dni_key"], keep="first")
 ak_by_cod = ak[ak["cod_key"].fillna("").astype(str).str.len() > 0].drop_duplicates(subset=["cod_key"], keep="first")
 
-# Curlle columnas requeridas
 need_cols = [
     "codigo_alumno", "periodo", "cod_curso", "nota_curlle", "plan", "cod_carrera",
     "curso_conva", "resol_conva"
@@ -1383,13 +1249,11 @@ for nc in need_cols:
 
 cur["cod_key"] = cur["codigo_alumno"].fillna("").astype(str).str.strip().str.upper()
 cur["periodo_fmt"] = cur["periodo"].map(periodo_formato)
-
 cur["cod_curso"] = cur["cod_curso"].map(normalize_cod_curso_spaces)
 cur["cod_curso_key"] = cur["cod_curso"].fillna("").astype(str).str.strip().str.upper()
 cur["plan_key"] = cur["plan"].fillna("").astype(str).str.strip()
 cur["carrera_key"] = cur["cod_carrera"].fillna("").astype(str).str.strip()
 
-# Planes columnas requeridas
 for nc in ["archivo", "codigo", "curso"]:
     if nc not in pl.columns:
         st.error(f"Planes no trae la columna esperada: {nc}")
@@ -1403,9 +1267,6 @@ pl2["plan_key"] = ex["plan"].fillna("").astype(str).str.strip()
 pl2["cod_curso_key"] = pl2["codigo"].fillna("").astype(str).str.strip().str.upper().map(normalize_cod_curso_spaces)
 pl2["curso"] = pl2["curso"].fillna("").astype(str).str.strip()
 
-# =========================
-# 1) Cruce con Akademic (P01) por DNI O COD
-# =========================
 step(65, "Cruce con Akademic (P01)...")
 m1 = padron.merge(ak_by_dni, how="left", on="dni_key", suffixes=("", "_akdni"))
 m2 = m1.merge(ak_by_cod, how="left", on="cod_key", suffixes=("", "_akcod"))
@@ -1445,9 +1306,6 @@ p01_data = pd.DataFrame({
     "PLAN-AKADEMIC": en_ak["ak_plan_final"],
 }).drop_duplicates()
 
-# =========================
-# 2) Cruce no akademic vs Curlle (P02 / P03)
-# =========================
 step(75, "Cruce con Curlle (P02/P03)...")
 no_ak_basic = no_ak.copy()
 no_ak_basic["nombre_completo"] = no_ak_basic["nombre_completo_calc"]
@@ -1468,19 +1326,12 @@ m_cur = no_ak_basic.loc[no_ak_basic["has_curlle_student"]].merge(
 m_cur["cod_curso_clean"] = m_cur["cod_curso"].fillna("").astype(str).str.strip()
 si_curlle = m_cur.loc[m_cur["cod_curso_clean"].ne("")].copy()
 
-# =========================================================
-# ✅ ARREGLO: Construir columnas necesarias para depurar_p03
-# - curso_resuelto, plan_out, cod_carrera_out, nombre_completo
-# =========================================================
-
-# Nombre completo (si no existe)
 if "nombre_completo" not in si_curlle.columns:
     if "nombre_completo_calc" in si_curlle.columns:
         si_curlle["nombre_completo"] = si_curlle["nombre_completo_calc"].fillna("").astype(str).str.strip()
     else:
         si_curlle["nombre_completo"] = ""
 
-# Asegurar llaves base
 if "carrera_key" not in si_curlle.columns:
     si_curlle["carrera_key"] = si_curlle.get("cod_carrera", "").fillna("").astype(str).str.strip()
 
@@ -1490,7 +1341,6 @@ if "plan_key" not in si_curlle.columns:
 if "cod_curso_key" not in si_curlle.columns:
     si_curlle["cod_curso_key"] = si_curlle.get("cod_curso", "").fillna("").astype(str).map(normalize_cod_curso_spaces)
 
-# Resolver nombre de curso + origen (desde pl2)
 if "curso_resuelto" not in si_curlle.columns or "plan_out" not in si_curlle.columns or "cod_carrera_out" not in si_curlle.columns:
     def _resolve_row(r):
         curso, carr_res, plan_res = resolve_course_name_and_origin(
@@ -1522,12 +1372,10 @@ if "curso_resuelto" not in si_curlle.columns or "plan_out" not in si_curlle.colu
         si_curlle["plan_out"] = si_curlle["plan_out"].fillna("").astype(str).str.strip()
         si_curlle.loc[si_curlle["plan_out"].eq(""), "plan_out"] = _resolved["plan_out"]
 
-# Blindaje final por si pl2 no encontró nada
 si_curlle["curso_resuelto"] = si_curlle["curso_resuelto"].fillna("").astype(str).str.strip()
 si_curlle["plan_out"] = si_curlle["plan_out"].fillna("").astype(str).str.strip()
 si_curlle["cod_carrera_out"] = si_curlle["cod_carrera_out"].fillna("").astype(str).str.strip()
 
-# fallback si quedaron vacíos
 si_curlle.loc[si_curlle["plan_out"].eq(""), "plan_out"] = si_curlle.get("plan", "").fillna("").astype(str).str.strip()
 si_curlle.loc[si_curlle["cod_carrera_out"].eq(""), "cod_carrera_out"] = si_curlle.get("cod_carrera", "").fillna("").astype(str).str.strip()
 si_curlle.loc[si_curlle["curso_resuelto"].eq(""), "curso_resuelto"] = si_curlle.get("cod_curso", "").fillna("").astype(str).map(normalize_cod_curso_spaces)
@@ -1547,22 +1395,15 @@ p02_data = pd.DataFrame({
     "PLAN-SUBIDO": no_curlle[padron_plan_sigu_col].fillna("").astype(str).str.strip() if padron_plan_sigu_col else "",
 })
 
-# =========================
-# ✅ MAPA: sufijo correcto para Curso Conva (ANTES de depurar)
-# - Llave estable: (cod_key, curso_conva, resol_conva)
-# ✅ NUEVO: el sufijo sale de PLANES (pl2) usando curso_conva (si es código tipo 14A08)
-# =========================
 def _looks_like_regular_course_code(x: str) -> bool:
     s = normalize_cod_curso_spaces(x)
     return bool(re.fullmatch(r"\d{2,3}[A-Z]\d{2}", s))
 
 _tmp = si_curlle.copy()
-
 _tmp["curso_conva_k"] = _tmp["curso_conva"].fillna("").astype(str).map(normalize_cod_curso_spaces)
 _tmp["resol_conva_k"] = _tmp["resol_conva"].fillna("").astype(str).str.strip()
 _tmp["cod_curso_k"] = _tmp["cod_curso"].fillna("").astype(str).map(normalize_cod_curso_spaces)
 
-# Programa del alumno (desde padrón) -> código (EN/PS/...)
 if padron_prog_col and padron_prog_col in _tmp.columns:
     _tmp["_prog_norm"] = _tmp[padron_prog_col].fillna("").astype(str).map(norm_text_keep_spaces)
     _tmp["_cod_prog_alumno"] = _tmp["_prog_norm"].map(lambda x: PROGRAMA_TO_COD.get(x, "")).fillna("")
@@ -1572,12 +1413,6 @@ else:
 grp_cols = ["cod_key", "curso_conva_k", "resol_conva_k"]
 
 def _suffix_from_planes_for_conva(conva_code: str, cod_prog_alumno: str) -> str:
-    """
-    Devuelve sufijo (carrera_key) para curso_conva usando pl2.
-    - Si el curso conva existe en una sola carrera => esa
-    - Si existe en varias => intenta por cod_prog_alumno y luego por familia
-    - Si sigue ambiguo => ""
-    """
     cc = normalize_cod_curso_spaces(conva_code)
     if not _looks_like_regular_course_code(cc):
         return ""
@@ -1587,7 +1422,7 @@ def _suffix_from_planes_for_conva(conva_code: str, cod_prog_alumno: str) -> str:
         return ""
 
     carreras = [str(x).strip() for x in hits["carrera_key"].fillna("").astype(str).tolist() if str(x).strip() != ""]
-    carreras = list(dict.fromkeys(carreras))  # unique preserve order
+    carreras = list(dict.fromkeys(carreras))
     if len(carreras) == 1:
         return carreras[0]
 
@@ -1601,11 +1436,10 @@ def _suffix_from_planes_for_conva(conva_code: str, cod_prog_alumno: str) -> str:
         if len(fam_cands) == 1:
             return fam_cands[0]
 
-    # ambiguo
     return ""
 
+
 def _pick_best_conva_suffix(g: pd.DataFrame) -> str:
-    # 0) Preferir PLANES por curso_conva (si es código regular tipo 14A08)
     conva_code = str(g["curso_conva_k"].iloc[0] if "curso_conva_k" in g.columns else "").strip()
     cod_prog_alumno = str(g["_cod_prog_alumno"].iloc[0] if "_cod_prog_alumno" in g.columns else "").strip()
 
@@ -1613,23 +1447,23 @@ def _pick_best_conva_suffix(g: pd.DataFrame) -> str:
     if suf_pl:
         return suf_pl
 
-    # 1) (fallback viejo) Preferir cod_carrera donde el curso ORIGEN es regular
     g1 = g[g["cod_curso_k"].map(_looks_like_regular_course_code) & g.get("cod_carrera", "").fillna("").astype(str).str.strip().ne("")]
     if len(g1) > 0:
         return str(g1.iloc[0].get("cod_carrera", "")).strip()
 
-    # 2) (fallback viejo) primer cod_carrera no vacío
     g2 = g[g.get("cod_carrera", "").fillna("").astype(str).str.strip().ne("")]
     if len(g2) > 0:
         return str(g2.iloc[0].get("cod_carrera", "")).strip()
 
     return ""
 
+
 conva_suffix_map = (
     _tmp.groupby(grp_cols, dropna=False, sort=False)
         .apply(_pick_best_conva_suffix)
         .to_dict()
 )
+
 step(85, "Depurando P03 y generando P04/P05...")
 si_curlle_dep = depurar_p03(
     si_df=si_curlle,
@@ -1640,7 +1474,6 @@ si_curlle_dep = depurar_p03(
 
 p03_codigo_alumno_from_padron = si_curlle_dep[padron_cod_col].fillna("").astype(str).str.strip()
 
-# ✅ Programa ORIGEN (desde cod_carrera_out)
 cod_carrera_origen = si_curlle_dep["cod_carrera_out"].fillna("").astype(str).str.strip()
 programa_origen = cod_carrera_origen.map(lambda x: COD_TO_PROGRAMA.get(x, x)).fillna("")
 
@@ -1648,7 +1481,7 @@ p03_data = pd.DataFrame({
     "Código Alumno": p03_codigo_alumno_from_padron,
     "Nombre Completo": si_curlle_dep["nombre_completo"],
     "Programa Academico": si_curlle_dep[padron_prog_col].fillna("").astype(str).str.strip() if padron_prog_col else "",
-    "Programa Origen": programa_origen,  # ✅ NUEVO
+    "Programa Origen": programa_origen,
     "Periodo": si_curlle_dep["periodo_fmt"],
     "Cod. Curso": si_curlle_dep["cod_curso"].fillna("").astype(str).map(normalize_cod_curso_spaces),
     "Nom. Curso": si_curlle_dep["curso_resuelto"].fillna("").astype(str).str.strip(),
@@ -1659,9 +1492,6 @@ p03_data = pd.DataFrame({
 })
 p03_data["OBS"] = ""
 
-# =========================
-# ✅ Convalidaciones desde Curlle (para P04 y P05)
-# =========================
 curso_conva_series = (
     si_curlle_dep["curso_conva"].fillna("").astype(str).str.strip()
     if "curso_conva" in si_curlle_dep.columns
@@ -1687,14 +1517,10 @@ def _get_conva_suffix(row) -> str:
 
 conva_suffix_series = si_curlle_dep.apply(_get_conva_suffix, axis=1).fillna("").astype(str).str.strip()
 
-# ✅ FIX REAL: AHORA SÍ APLICA EL SUFIJO (antes lo calculabas y no lo usabas)
 curso_conva_final = curso_conva_series.copy()
 mask_concat = is_codcurso_conva & conva_suffix_series.ne("")
 curso_conva_final.loc[mask_concat] = curso_conva_norm.loc[mask_concat] + "-" + conva_suffix_series.loc[mask_concat]
 
-# =========================
-# P04
-# =========================
 programa_series = (
     si_curlle_dep[padron_prog_col].fillna("").astype(str)
     if padron_prog_col and padron_prog_col in si_curlle_dep.columns
@@ -1736,12 +1562,9 @@ plan_codigo_series = (
 
 tipo_matricula_series = si_curlle_dep["cod_curso"].map(tipo_matricula_from_codcurso)
 
-# ✅ Periodo P04:
 periodo_p04 = si_curlle_dep["periodo_fmt"].fillna("").astype(str).str.strip().copy()
 
-# ✅ NUEVO: flag CEX solo si el periodo original era "#¿NOMBRE?"
 cex_mask = periodo_p04.eq("#¿NOMBRE?")
-
 exsuf_mask = si_curlle_dep["cod_curso"].fillna("").astype(str).map(normalize_cod_curso_spaces).str.startswith("EXSUF")
 bad_mask = periodo_p04.isin(["#¿NOMBRE?", "221"])
 fix_mask = exsuf_mask | bad_mask
@@ -1773,10 +1596,18 @@ codigo_curso_series = pd.Series(codigo_curso_series, index=si_curlle_dep.index).
 
 p04_ok_mask = codigo_curso_series.fillna("").astype(str).str.strip().ne("")
 p03_data.loc[~p04_ok_mask.values, "OBS"] = "NO EXISTE / NO SIMILAR EN PLAN (NO PASA A P04)"
-
 faltan_codigo_curso = int((~p04_ok_mask).sum())
 
-p04_data = pd.DataFrame({
+# =========================================================
+# ✅ CONSOLIDACIÓN FINAL SOLO EN P04/P05
+# Regla:
+# - Si Taller Escrita / Taller Oral / Redacción caen al mismo CodigoCurso destino,
+#   predomina la nota de:
+#   1) Taller Escrita
+#   2) Taller Oral
+#   3) Redacción
+# =========================================================
+work = pd.DataFrame({
     "Periodo": periodo_p04,
     "CodigoAlumno": p03_codigo_alumno_from_padron,
     "Seccion": "A",
@@ -1784,44 +1615,45 @@ p04_data = pd.DataFrame({
     "CodigoPlan": plan_codigo_series,
     "CodigoCurso": codigo_curso_series,
     "TipoMatricula": tipo_matricula_series,
-    "Curso Conva": curso_conva_final,     # ✅ APLICADO
+    "Curso Conva": curso_conva_final,
     "Resol. Conva": resol_conva_series,
+    "Nota": si_curlle_dep["nota_curlle"].fillna("").astype(str),
+    "_curso_origen_nombre": si_curlle_dep["curso_resuelto"].fillna("").astype(str).str.strip(),
+    "_nota_sort": si_curlle_dep["nota_curlle"].map(parse_nota_to_float).fillna(-1),
 })
+work["_prio_reda"] = work["_curso_origen_nombre"].map(_reda_source_priority)
+work["_idx0"] = np.arange(len(work))
 
-p04_data = p04_data.loc[p04_ok_mask.values].copy()
+work_ok = work.loc[p04_ok_mask.values].copy()
 
-# ✅ EXTRA BLINDAJE ANTI-DUP
-p04_data = p04_data.drop_duplicates(
-    subset=["Periodo", "CodigoAlumno", "CodigoCurso", "CodigoPlan", "TipoMatricula"],
-    keep="first",
-).copy()
+# P04
+p04_data = (
+    work_ok.sort_values(
+        by=["Periodo", "CodigoAlumno", "CodigoCurso", "CodigoPlan", "TipoMatricula", "_prio_reda", "_nota_sort", "_idx0"],
+        ascending=[True, True, True, True, True, False, False, True],
+    )
+    .drop_duplicates(
+        subset=["Periodo", "CodigoAlumno", "CodigoCurso", "CodigoPlan", "TipoMatricula"],
+        keep="first",
+    )
+    [["Periodo", "CodigoAlumno", "Seccion", "CodigoEscuela", "CodigoPlan", "CodigoCurso", "TipoMatricula", "Curso Conva", "Resol. Conva"]]
+    .copy()
+)
 
-# =========================
-# ✅ P05 (Carga de notas)
-# =========================
-nota_series = si_curlle_dep["nota_curlle"].fillna("").astype(str)
+# P05
+p05_data = (
+    work_ok.sort_values(
+        by=["Periodo", "CodigoAlumno", "CodigoCurso", "CodigoPlan", "TipoMatricula", "_prio_reda", "_nota_sort", "_idx0"],
+        ascending=[True, True, True, True, True, False, False, True],
+    )
+    .drop_duplicates(
+        subset=["Periodo", "CodigoAlumno", "CodigoCurso", "CodigoPlan", "TipoMatricula"],
+        keep="first",
+    )
+    [["CodigoAlumno", "Periodo", "CodigoCurso", "CodigoPlan", "Nota", "TipoMatricula", "Curso Conva", "Resol. Conva"]]
+    .copy()
+)
 
-p05_data = pd.DataFrame({
-    "CodigoAlumno": p03_codigo_alumno_from_padron,
-    "Periodo": periodo_p04,
-    "CodigoCurso": codigo_curso_series,
-    "CodigoPlan": plan_codigo_series,
-    "Nota": nota_series,
-    "TipoMatricula": tipo_matricula_series,
-    "Curso Conva": curso_conva_final,     # ✅ APLICADO
-    "Resol. Conva": resol_conva_series,
-})
-
-p05_data = p05_data.loc[p04_ok_mask.values].copy()
-
-p05_data = p05_data.drop_duplicates(
-    subset=["Periodo", "CodigoAlumno", "CodigoCurso", "CodigoPlan", "TipoMatricula", "Nota"],
-    keep="first",
-).copy()
-
-# =========================
-# Render previews + Export
-# =========================
 def _style_p03(row):
     if str(row.get("OBS", "")).strip() != "":
         return ["background-color: #fff59d"] * len(row)
@@ -1866,11 +1698,9 @@ p01_sheet = align_df_to_template_df(P01_TEMPLATE, p01_data)
 p02_sheet = align_df_to_template_df(P02_TEMPLATE, p02_data)
 p03_sheet = align_df_to_template_df(P03_TEMPLATE, p03_data).reset_index(drop=True)
 
-# ✅ FORZAR CREACIÓN DE OBS EN P03 AUNQUE LA PLANTILLA NO LA TRAIGA
 if "OBS" not in p03_sheet.columns:
     p03_sheet["OBS"] = ""
 
-# ✅ COPIAR EL CONTENIDO REAL DE OBS DESDE p03_data
 p03_sheet["OBS"] = (
     p03_data["OBS"]
     .fillna("")
