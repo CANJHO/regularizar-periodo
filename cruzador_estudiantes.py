@@ -491,6 +491,7 @@ COURSE_ALIAS_GROUPS = [
         "seminario tesis ii",
         "seminario de tesis 2",
         "seminario tesis 2",
+        "Seminario de Tesis II",
     },
 ]
 
