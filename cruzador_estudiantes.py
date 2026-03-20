@@ -476,6 +476,47 @@ COURSE_STOPWORDS = {
 
 ROMAN_KEEP = {"ii", "iii", "iv", "v", "vi", "vii", "viii", "ix", "x"}  # se conservan
 
+# ✅ Variantes que NO deben romper el match real del curso
+COURSE_VARIANT_PATTERNS = [
+    r"\bexamen de suficiencia\b",
+    r"\belectiv[oa]\b(?:\s*[0-9]+)?",
+    r"\belectiv[oa]\b(?:\s*[ivx]+)?",
+]
+
+# ✅ Alias semánticos de cursos que deben considerarse equivalentes
+COURSE_ALIAS_GROUPS = [
+    {
+        "trabajo de investigacion",
+        "seminario de tesis ii",
+        "seminario tesis ii",
+        "seminario de tesis 2",
+        "seminario tesis 2",
+    },
+]
+
+def strip_course_variants(text: str) -> str:
+    s = norm_text_keep_spaces(text)
+    if s == "":
+        return ""
+
+    for pat in COURSE_VARIANT_PATTERNS:
+        s = re.sub(pat, " ", s, flags=re.IGNORECASE)
+
+    s = re.sub(r"\s*-\s*", " ", s)
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
+
+def apply_course_alias(text: str) -> str:
+    s = strip_course_variants(text)
+    if s == "":
+        return ""
+
+    for group in COURSE_ALIAS_GROUPS:
+        if s in group:
+            return sorted(group)[0]
+
+    return s
+
 
 def parse_nota_to_float(x) -> float:
     s = "" if x is None else str(x).strip()
@@ -491,14 +532,11 @@ def parse_nota_to_float(x) -> float:
 def course_base_name(cod_curso: str, nom_curso: str) -> str:
     cod = "" if cod_curso is None else str(cod_curso).strip().upper()
     nom = "" if nom_curso is None else str(nom_curso).strip()
-    nom_n = norm_text_keep_spaces(nom)
 
-    if "examen de suficiencia" in nom_n:
-        nom_n = nom_n.replace("examen de suficiencia", "").strip()
-        nom_n = re.sub(r"\s+", " ", nom_n).strip()
-
+    nom_n = apply_course_alias(nom)
     nom_n = re.sub(r"\s*-\s*$", "", nom_n).strip()
     nom_n = re.sub(r"\s*-\s+", " ", nom_n).strip()
+    nom_n = re.sub(r"\s+", " ", nom_n).strip()
 
     return nom_n if nom_n != "" else cod
 
@@ -526,13 +564,14 @@ def course_match_key(text: str) -> str:
     """
     Key fuerte para dedupe:
     - normaliza (tildes, etc.)
+    - quita variantes tipo electivo / examen de suficiencia
+    - aplica alias semánticos (ej: Trabajo de Investigación == Seminario de Tesis II)
     - quita SOLO sufijo I/1 al final (NO toca II, III...)
-    - elimina stopwords (de, y, del, ...)
+    - elimina stopwords
     - singulariza suave
-    - ordena tokens => "A y B" == "B A"
-    - mantiene II/III/IV como token para que "X" != "X II"
+    - ordena tokens
     """
-    t = norm_text_keep_spaces(text)
+    t = apply_course_alias(text)
 
     # quitar SOLO ' i' o ' 1' al final
     t = re.sub(r"\s+(i|1)\s*$", "", t).strip()
@@ -546,6 +585,7 @@ def course_match_key(text: str) -> str:
     for w in toks:
         if w in COURSE_STOPWORDS:
             continue
+
         w = _soft_singularize_token(w)
 
         if w in ROMAN_KEEP:
@@ -937,17 +977,20 @@ def _name_like_ok(target_name: str, cand_name: str, min_ratio: float = 0.78) -> 
     if t_raw == "" or c_raw == "":
         return False
 
-    if not _roman_level_compatible(t_raw, c_raw):
-        return False
-
     tk = _course_name_key(t_raw)
     ck = _course_name_key(c_raw)
 
+    # ✅ si la key semántica coincide, ya es válido aunque uno diga ELECTIVO
+    # ✅ o aunque sea Trabajo de Investigación vs Seminario de Tesis II
     if tk != "" and tk == ck:
         return True
 
-    t = norm_text_keep_spaces(t_raw)
-    c = norm_text_keep_spaces(c_raw)
+    # Si ambos nombres traen nivel romano explícito y difieren, bloquear
+    if not _roman_level_compatible(t_raw, c_raw):
+        return False
+
+    t = apply_course_alias(t_raw)
+    c = apply_course_alias(c_raw)
 
     if t == "" or c == "":
         return False
@@ -958,7 +1001,7 @@ def _name_like_ok(target_name: str, cand_name: str, min_ratio: float = 0.78) -> 
 
 def _best_fuzzy_match_code(same_plan_df: pd.DataFrame, nombre_curso: str, min_ratio: float = 0.86) -> str:
     target_raw = "" if nombre_curso is None else str(nombre_curso)
-    target = norm_text_keep_spaces(target_raw)
+    target = apply_course_alias(target_raw)
     if target == "":
         return ""
 
@@ -967,12 +1010,15 @@ def _best_fuzzy_match_code(same_plan_df: pd.DataFrame, nombre_curso: str, min_ra
 
     for _, r in same_plan_df.iterrows():
         cand_raw = "" if r.get("curso_raw", "") is None else str(r.get("curso_raw", ""))
-        cand = norm_text_keep_spaces(cand_raw)
+        cand = apply_course_alias(cand_raw)
         if cand == "":
             continue
 
+        # si ambos tienen romano explícito y choca, se bloquea
         if not _roman_level_compatible(target_raw, cand_raw):
-            continue
+            # excepto si ya son equivalentes por alias semántico
+            if _course_name_key(target_raw) != _course_name_key(cand_raw):
+                continue
 
         ratio = difflib.SequenceMatcher(None, target, cand).ratio()
         if ratio > best_ratio:
@@ -1008,14 +1054,14 @@ def lookup_codigo_curso_tpa(tpa_map: pd.DataFrame, escuela: str, plan: str, codc
             if _name_like_ok(nombre_curso, cand_name, min_ratio=0.78):
                 return str(exact.iloc[0]["codigo_raw"]).strip()
 
-    # 2) exact por nombre key
+    # 2) exact por nombre key semántica
     nk = _course_name_key(nombre_curso)
     if nk != "":
         same_plan2 = same_plan[same_plan["curso_name_key"] == nk]
         if len(same_plan2) > 0:
             return str(same_plan2.iloc[0]["codigo_raw"]).strip()
 
-    # 3) fuzzy por parecido
+    # 3) fuzzy por parecido dentro del mismo plan
     fb = _best_fuzzy_match_code(same_plan, nombre_curso=nombre_curso, min_ratio=0.86)
     if fb:
         cand = same_plan[same_plan["codigo_raw"].astype(str).str.strip() == fb]
