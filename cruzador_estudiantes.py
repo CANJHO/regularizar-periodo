@@ -1039,6 +1039,11 @@ with st.sidebar:
 
     st.divider()
     usar_override = st.checkbox("Quiero reemplazar archivos base (override)", value=False)
+    modo_libre_p345 = st.checkbox(
+    "Modo libre: generar directo P03/P04/P05 (ignorar filtro P01/P02)",
+    value=False,
+    help="Permite procesar alumnos aunque ya existan en Akademic. Útil para corregir notas o cargar cursos faltantes."
+)
 
     akademic_file = None
     curlle_file = None
@@ -1061,11 +1066,17 @@ if not padron_file:
 if not run_btn:
     st.stop()
 
-progress = st.progress(0, text="Iniciando...")
+prog = st.progress(0)
 status = st.empty()
 
+if modo_libre_p345:
+    st.warning(
+        "Modo libre activo: esta ejecución puede generar P03/P04/P05 para alumnos que ya existen en Akademic. "
+        "Úsalo solo para corrección de notas, cursos faltantes o recargas controladas."
+    )
+
 def step(p: int, msg: str):
-    progress.progress(p, text=msg)
+    prog.progress(p, text=msg)
     status.info(msg)
 
 
@@ -1299,27 +1310,68 @@ exists_mask = (m2["ak_codigo_final"].str.strip() != "") | (m2["ak_full_final"].s
 en_ak = m2.loc[exists_mask].copy()
 no_ak = m2.loc[~exists_mask].copy()
 
-st.info(f"DEBUG: Padron={len(padron):,} | EnAkademic(P01)={len(en_ak):,} | NoAkademic={len(no_ak):,}")
+# ✅ base_p345 debe existir ANTES del debug
+if modo_libre_p345:
+    base_p345 = m2.copy()
+else:
+    base_p345 = no_ak.copy()
 
-p01_data = pd.DataFrame({
-    "CODIGO_ESTUDIANTE": en_ak["ak_codigo_final"],
-    "DNI": en_ak["ak_dni_raw_final"],
-    "PROGRAMA ACADEMICO": en_ak["ak_prog_final"],
-    "NOMBRES-COMPLETOS": en_ak["ak_full_final"],
-    "PLAN-AKADEMIC": en_ak["ak_plan_final"],
-}).drop_duplicates()
+if modo_libre_p345:
+    st.info(
+        f"DEBUG MODO LIBRE: Padron={len(padron):,} | "
+        f"EnAkademic={len(en_ak):,} | "
+        f"Procesados hacia P03/P04/P05={len(base_p345):,}"
+    )
+else:
+    st.info(
+        f"DEBUG: Padron={len(padron):,} | "
+        f"EnAkademic(P01)={len(en_ak):,} | "
+        f"NoAkademic={len(no_ak):,}"
+    )
+
+if modo_libre_p345:
+    p01_data = pd.DataFrame(columns=[
+        "CODIGO_ESTUDIANTE",
+        "DNI",
+        "PROGRAMA ACADEMICO",
+        "NOMBRES-COMPLETOS",
+        "PLAN-AKADEMIC",
+    ])
+else:
+    p01_data = pd.DataFrame({
+        "CODIGO_ESTUDIANTE": en_ak["ak_codigo_final"],
+        "DNI": en_ak["ak_dni_raw_final"],
+        "PROGRAMA ACADEMICO": en_ak["ak_prog_final"],
+        "NOMBRES-COMPLETOS": en_ak["ak_full_final"],
+        "PLAN-AKADEMIC": en_ak["ak_plan_final"],
+    }).drop_duplicates()
 
 step(75, "Cruce con Curlle (P02/P03)...")
-no_ak_basic = no_ak.copy()
-no_ak_basic["nombre_completo"] = no_ak_basic["nombre_completo_calc"]
+
+if modo_libre_p345:
+    base_p345 = m2.copy()
+    st.warning("⚠️ Modo libre activo: se ignora el filtro de P01/P02 y se procesará el padrón directo hacia P03/P04/P05.")
+else:
+    base_p345 = no_ak.copy()
+
+base_p345["nombre_completo"] = base_p345["nombre_completo_calc"]
 
 cur_codcurso_clean = cur["cod_curso"].fillna("").astype(str).str.strip()
-cur_valid_student_keys = set(cur.loc[cur_codcurso_clean.ne(""), "cod_key"].astype(str).str.strip().str.upper().unique())
+cur_valid_student_keys = set(
+    cur.loc[cur_codcurso_clean.ne(""), "cod_key"]
+       .astype(str).str.strip().str.upper().unique()
+)
 
-no_ak_basic["has_curlle_student"] = no_ak_basic["cod_key"].fillna("").astype(str).str.strip().str.upper().isin(cur_valid_student_keys)
-no_curlle = no_ak_basic.loc[~no_ak_basic["has_curlle_student"]].copy()
+base_p345["has_curlle_student"] = (
+    base_p345["cod_key"]
+    .fillna("")
+    .astype(str).str.strip().str.upper()
+    .isin(cur_valid_student_keys)
+)
 
-m_cur = no_ak_basic.loc[no_ak_basic["has_curlle_student"]].merge(
+no_curlle = base_p345.loc[~base_p345["has_curlle_student"]].copy()
+
+m_cur = base_p345.loc[base_p345["has_curlle_student"]].merge(
     cur,
     how="left",
     on="cod_key",
@@ -1384,19 +1436,27 @@ si_curlle.loc[si_curlle["cod_carrera_out"].eq(""), "cod_carrera_out"] = si_curll
 si_curlle.loc[si_curlle["curso_resuelto"].eq(""), "curso_resuelto"] = si_curlle.get("cod_curso", "").fillna("").astype(str).map(normalize_cod_curso_spaces)
 
 st.info(
-    "DEBUG CURLLE MATCH (ANTI-JOIN) -> "
-    f"NoAkademic alumnos={len(no_ak_basic):,} | "
-    f"ConCurlle(alumno)={int(no_ak_basic['has_curlle_student'].sum()):,} | "
-    f"SinCurlle(P02 alumnos)={len(no_curlle):,} | "
+    "DEBUG CURLLE MATCH -> "
+    f"Base alumnos={len(base_p345):,} | "
+    f"ConCurlle(alumno)={int(base_p345['has_curlle_student'].sum()):,} | "
+    f"SinCurlle={len(no_curlle):,} | "
     f"FilasCurlleReales(P03 base)={len(si_curlle):,}"
 )
 
-p02_data = pd.DataFrame({
-    "CODIGO_ESTUDIANTE": no_curlle[padron_cod_col].fillna("").astype(str).str.strip(),
-    "PROGRAMA ACADEMICO": no_curlle[padron_prog_col].fillna("").astype(str).str.strip() if padron_prog_col else "",
-    "NOMBRES-COMPLETOS": no_curlle["nombre_completo"],
-    "PLAN-SUBIDO": no_curlle[padron_plan_sigu_col].fillna("").astype(str).str.strip() if padron_plan_sigu_col else "",
-})
+if modo_libre_p345:
+    p02_data = pd.DataFrame(columns=[
+        "CODIGO_ESTUDIANTE",
+        "PROGRAMA ACADEMICO",
+        "NOMBRES-COMPLETOS",
+        "PLAN-SUBIDO",
+    ])
+else:
+    p02_data = pd.DataFrame({
+        "CODIGO_ESTUDIANTE": no_curlle[padron_cod_col].fillna("").astype(str).str.strip(),
+        "PROGRAMA ACADEMICO": no_curlle[padron_prog_col].fillna("").astype(str).str.strip() if padron_prog_col else "",
+        "NOMBRES-COMPLETOS": no_curlle["nombre_completo"],
+        "PLAN-SUBIDO": no_curlle[padron_plan_sigu_col].fillna("").astype(str).str.strip() if padron_plan_sigu_col else "",
+    })
 
 def _looks_like_regular_course_code(x: str) -> bool:
     s = normalize_cod_curso_spaces(x)
