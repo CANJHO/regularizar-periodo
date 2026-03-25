@@ -414,6 +414,7 @@ PROGRAMA_TO_COD = {
     norm_text_keep_spaces("MEDICINA HUMANA"): "MH",
     norm_text_keep_spaces("OBSTETRICIA"): "OB",
     norm_text_keep_spaces("ADMINISTRACIÓN Y FINANZA"): "AF",
+    norm_text_keep_spaces("INGENIERÍA EN INDUSTRIAS ALIMENTARIAS"): "II",
 }
 
 COD_TO_PROGRAMA = {
@@ -429,6 +430,7 @@ COD_TO_PROGRAMA = {
     "MH": "MEDICINA HUMANA",
     "OB": "OBSTETRICIA",
     "AF": "ADMINISTRACIÓN Y FINANZA",
+    "II": "INGENIERÍA EN INDUSTRIAS ALIMENTARIAS",
 }
 
 FAM_ING = {"AF", "DE", "IS", "CO", "IN", "AE", "IC", "AR"}
@@ -846,6 +848,7 @@ PROG_TO_ESCUELA = {
     norm_text_keep_spaces("ADMINISTRACIÓN Y FINANZA"): "P01",
     norm_text_keep_spaces("ADMINISTRACION Y FINANZAS"): "P01",
     norm_text_keep_spaces("ADMINISTRACION Y FINANZA"): "P01",
+    norm_text_keep_spaces("INGENIERÍA EN INDUSTRIAS ALIMENTARIAS"): "P05",
 }
 
 PLAN_ORDER = ["14210", "20172", "201722", "20201", "202011", "20222", "202312", "20242", "20251"]
@@ -853,7 +856,7 @@ PLAN_ORDER = ["14210", "20172", "201722", "20201", "202011", "20222", "202312", 
 ESCUELA_PLANES_ACTIVOS = {
     "P01": {"202011", "20242"},
     "P03": {"202011", "20242"},
-    "P05": set(),
+    "P05": {"14210", "20201"},
     "P06": {"202011", "20242"},
     "P32": {"20242"},
     "P08": {"201722", "202312", "20242", "20251"},
