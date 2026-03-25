@@ -433,7 +433,7 @@ COD_TO_PROGRAMA = {
     "II": "INGENIERÍA EN INDUSTRIAS ALIMENTARIAS",
 }
 
-FAM_ING = {"AF", "DE", "IS", "CO", "IN", "AE", "IC", "AR"}
+FAM_ING = {"AF", "DE", "IS", "CO", "IN", "AE", "IC", "AR", "II"}
 FAM_SALUD = {"PS", "EN", "OB", "MH"}
 
 COURSE_STOPWORDS = {
